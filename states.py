@@ -12,21 +12,9 @@ class ExtendUser(StatesGroup):
     days = State()
 
 
-class ReduceDays(StatesGroup):
-    days = State()
-
-
 class AddDataUser(StatesGroup):
-    gb = State()
-
-
-class ReduceDataUser(StatesGroup):
     gb = State()
 
 
 class EditLocation(StatesGroup):
     select = State()
-
-
-class CustomerRegister(StatesGroup):
-    username = State()
