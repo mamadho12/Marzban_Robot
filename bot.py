@@ -17,7 +17,7 @@ from keyboards import (
     main_menu_kb, users_list_kb, user_detail_kb,
     confirm_kb, cancel_kb, location_kb, customer_menu_kb,
 )
-from states import AddUser, ExtendUser, AddDataUser, EditLocation, CustomerRegister
+from states import AddUser, ExtendUser, ReduceDays, AddDataUser, ReduceDataUser, EditLocation, CustomerRegister
 import customer_storage
 
 logging.basicConfig(level=logging.INFO)
@@ -663,6 +663,42 @@ async def extend_days(message: Message, state: FSMContext):
     )
 
 
+@router.callback_query(F.data.startswith("reduceday:"))
+@admin_only
+async def cb_reduce_day(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    await state.update_data(username=username)
+    await state.set_state(ReduceDays.days)
+    await call.message.edit_text(f"چند روز از اعتبار «{username}» کم بشه؟", reply_markup=cancel_kb())
+    await call.answer()
+
+
+@router.message(ReduceDays.days)
+@admin_only
+async def reduce_days(message: Message, state: FSMContext):
+    try:
+        days = int(message.text.strip())
+    except ValueError:
+        await message.answer("یک عدد صحیح بفرست:")
+        return
+    if days <= 0:
+        await message.answer("یک عدد مثبت بفرست:")
+        return
+    data = await state.get_data()
+    username = data["username"]
+    await state.clear()
+    try:
+        user = await marzban.subtract_days(username, days)
+    except MarzbanError as e:
+        await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
+        return
+    await message.answer(
+        f"✅ انجام شد.\n\n{await user_summary(user)}",
+        reply_markup=user_detail_kb(username, user.get("status", "active")),
+        parse_mode="HTML"
+    )
+
+
 @router.callback_query(F.data.startswith("adddata:"))
 @admin_only
 async def cb_adddata(call: CallbackQuery, state: FSMContext):
@@ -686,6 +722,42 @@ async def adddata_gb(message: Message, state: FSMContext):
     await state.clear()
     try:
         user = await marzban.add_data_gb(username, gb)
+    except MarzbanError as e:
+        await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
+        return
+    await message.answer(
+        f"✅ انجام شد.\n\n{await user_summary(user)}",
+        reply_markup=user_detail_kb(username, user.get("status", "active")),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("reducedata:"))
+@admin_only
+async def cb_reduce_data(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    await state.update_data(username=username)
+    await state.set_state(ReduceDataUser.gb)
+    await call.message.edit_text(f"چند گیگابایت از حجم «{username}» کم بشه؟", reply_markup=cancel_kb())
+    await call.answer()
+
+
+@router.message(ReduceDataUser.gb)
+@admin_only
+async def reduce_data_gb(message: Message, state: FSMContext):
+    try:
+        gb = float(message.text.strip())
+    except ValueError:
+        await message.answer("یک عدد معتبر بفرست:")
+        return
+    if gb <= 0:
+        await message.answer("یک عدد مثبت بفرست:")
+        return
+    data = await state.get_data()
+    username = data["username"]
+    await state.clear()
+    try:
+        user = await marzban.subtract_data_gb(username, gb)
     except MarzbanError as e:
         await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
         return
