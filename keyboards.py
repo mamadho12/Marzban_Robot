@@ -12,7 +12,6 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 
 def users_list_kb(users: list[dict], offset: int, has_more: bool) -> InlineKeyboardMarkup:
-    """users: [{"username": str, "online": bool, "status": str}, ...]"""
     b = InlineKeyboardBuilder()
     for u in users:
         dot = "🟢" if u.get("online") else "⚪️"
@@ -51,7 +50,6 @@ def user_detail_kb(username: str, status: str = "active") -> InlineKeyboardMarku
 
 
 def location_kb(selected: set[str] | None = None, confirm_cb: str = "loc_confirm") -> InlineKeyboardMarkup:
-    """کیبورد چندانتخابی لوکیشن"""
     if selected is None:
         selected = set()
     b = InlineKeyboardBuilder()
