@@ -7,7 +7,7 @@ from typing import Optional
 
 import httpx
 
-from config import MARZBAN_URL, MARZBAN_USERNAME, MARZBAN_PASSWORD
+from config import MARZBAN_URL, MARZBAN_USERNAME, MARZBAN_PASSWORD, LOCATIONS
 
 
 class MarzbanError(Exception):
@@ -94,8 +94,39 @@ class MarzbanAPI:
             raise MarzbanError("هیچ این‌باندی روی نود پیدا نشد؛ اول یک این‌باند در پنل مرزبان تعریف کن.")
         return proxies, inbounds
 
-    async def create_user(self, username: str, data_limit_gb: float, expire_days: int):
-        proxies, inbounds = await self._default_proxies_and_inbounds()
+    async def _proxies_and_inbounds_for_locations(self, location_names: list[str]):
+        """ساخت proxies و inbounds فقط برای لوکیشن‌های انتخاب‌شده"""
+        if not location_names:
+            raise MarzbanError("حداقل یک لوکیشن باید انتخاب شود")
+
+        selected_tags = set()
+        for name in location_names:
+            if name not in LOCATIONS:
+                raise MarzbanError(f"لوکیشن نامعتبر: {name}")
+            selected_tags.update(LOCATIONS[name])
+
+        inbounds_data = await self.get_inbounds()
+        proxies = {}
+        inbounds = {}
+
+        for protocol, inbound_list in inbounds_data.items():
+            matching_tags = [ib["tag"] for ib in inbound_list if ib["tag"] in selected_tags]
+            if matching_tags:
+                proxies[protocol] = {}
+                inbounds[protocol] = matching_tags
+
+        if not proxies:
+            raise MarzbanError("هیچ اینباند معتبری برای لوکیشن‌های انتخاب‌شده پیدا نشد")
+
+        return proxies, inbounds
+
+    async def create_user(self, username: str, data_limit_gb: float, expire_days: int,
+                          location_names: list[str] | None = None):
+        if location_names is None:
+            proxies, inbounds = await self._default_proxies_and_inbounds()
+        else:
+            proxies, inbounds = await self._proxies_and_inbounds_for_locations(location_names)
+
         body = {
             "username": username,
             "proxies": proxies,
@@ -111,6 +142,11 @@ class MarzbanAPI:
         else:
             body["expire"] = 0  # نامحدود
         return await self._request("POST", "/api/user", json=body)
+
+    async def set_user_locations(self, username: str, location_names: list[str]):
+        """تغییر لوکیشن‌های یک کاربر موجود"""
+        proxies, inbounds = await self._proxies_and_inbounds_for_locations(location_names)
+        return await self.modify_user(username, proxies=proxies, inbounds=inbounds)
 
     async def modify_user(self, username: str, **fields):
         return await self._request("PUT", f"/api/user/{username}", json=fields)
