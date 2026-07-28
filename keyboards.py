@@ -41,6 +41,9 @@ def user_detail_kb(username: str, status: str = "active") -> InlineKeyboardMarku
         InlineKeyboardButton(text="ریست مصرف", callback_data=f"reset:{username}"),
         InlineKeyboardButton(text="لینک اشتراک", callback_data=f"link:{username}"),
     )
+    b.row(
+        InlineKeyboardButton(text="کپی همه کانفیگ‌ها", callback_data=f"copyconfigs:{username}")
+    )
     status_toggle = "غیرفعال‌سازی" if status == "active" else "فعال‌سازی"
     b.row(InlineKeyboardButton(text=status_toggle, callback_data=f"toggle:{username}"))
     b.row(InlineKeyboardButton(text="ویرایش لوکیشن", callback_data=f"editloc:{username}"))
