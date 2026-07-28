@@ -76,6 +76,12 @@ def confirm_kb(action: str, username: str) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def customer_menu_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="🎰 شانس هفتگی", callback_data="spin"))
+    return b.as_markup()
+
+
 def cancel_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="لغو", callback_data="main_menu"))
