@@ -73,6 +73,10 @@ class MarzbanAPI:
     async def get_inbounds(self):
         return await self._request("GET", "/api/inbounds")
 
+    async def get_nodes(self):
+        """لیست نودها و وضعیت‌شون"""
+        return await self._request("GET", "/api/nodes")
+
     async def _default_proxies_and_inbounds(self):
         inbounds_data = await self.get_inbounds()
         proxies = {}
@@ -164,10 +168,8 @@ class MarzbanAPI:
         return await self._request("GET", "/api/system")
 
     async def fetch_subscription_content(self, sub_url: str) -> str:
-        """محتوای لینک اشتراک رو می‌گیره (برای استخراج کانفیگ‌ها)"""
         if not sub_url:
             return ""
-        # اگه نسبی باشه کاملش می‌کنیم
         if sub_url.startswith("/"):
             sub_url = MARZBAN_URL + sub_url
         try:
