@@ -4,7 +4,6 @@ import logging
 import datetime
 import json
 import base64
-import random
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
@@ -15,10 +14,9 @@ from config import BOT_TOKEN, ADMIN_IDS, MARZBAN_URL, LOCATIONS
 from marzban_api import marzban, MarzbanError
 from keyboards import (
     main_menu_kb, users_list_kb, user_detail_kb,
-    confirm_kb, cancel_kb, location_kb, customer_menu_kb,
+    confirm_kb, cancel_kb, location_kb,
 )
-from states import AddUser, ExtendUser, ReduceDays, AddDataUser, ReduceDataUser, EditLocation, CustomerRegister
-import customer_storage
+from states import AddUser, ExtendUser, AddDataUser, EditLocation
 
 logging.basicConfig(level=logging.INFO)
 
@@ -263,104 +261,15 @@ async def user_summary(user: dict) -> str:
     return "\n".join(lines)
 
 
+# ---------- شروع و منو ----------
+
 @router.message(Command("start"))
+@admin_only
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    user_id = message.from_user.id
-
-    if user_id in ADMIN_IDS:
-        nodes_text = await get_nodes_status_text()
-        text = f"سلام! 👋\n\n🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
-        await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
-        return
-
-    # ---- کاربر عادی (مشتری) ----
-    reg = await customer_storage.get_registration(user_id)
-    if reg:
-        await message.answer(
-            f"سلام! 👋\nحساب متصل: <code>{reg['username']}</code>\n\nهر هفته یه‌بار می‌تونی شانست رو امتحان کنی:",
-            reply_markup=customer_menu_kb(),
-            parse_mode="HTML",
-        )
-        return
-
-    await state.set_state(CustomerRegister.username)
-    await message.answer(
-        "سلام! 👋\nبرای اتصال به حساب VPN‌ت، یوزرنیمی که ازمون گرفتی رو بفرست:"
-    )
-
-
-@router.message(CustomerRegister.username)
-async def customer_register_username(message: Message, state: FSMContext):
-    username = message.text.strip()
-    user_id = message.from_user.id
-
-    try:
-        vpn_user = await marzban.get_user(username)
-    except MarzbanError:
-        await message.answer("همچین یوزرنیمی پیدا نشد. دوباره امتحان کن یا با پشتیبانی هماهنگ کن:")
-        return
-
-    owner = await customer_storage.find_owner_of_username(username)
-    if owner is not None and owner != user_id:
-        await message.answer("این یوزرنیم قبلاً به یه اکانت تلگرام دیگه وصل شده. اگه اشتباهیه با پشتیبانی هماهنگ کن.")
-        return
-
-    await customer_storage.register(user_id, username)
-    await state.clear()
-    await message.answer(
-        f"✅ وصل شد! حساب: <code>{vpn_user.get('username')}</code>\n\nهر هفته یه‌بار می‌تونی شانست رو امتحان کنی:",
-        reply_markup=customer_menu_kb(),
-        parse_mode="HTML",
-    )
-
-
-SPIN_COOLDOWN_DAYS = 7
-SPIN_REWARDS_GB = [0.1, 0.2, 0.3, 0.5]
-
-
-@router.callback_query(F.data == "spin")
-async def cb_spin(call: CallbackQuery, state: FSMContext):
-    user_id = call.from_user.id
-    reg = await customer_storage.get_registration(user_id)
-    if not reg:
-        await call.answer("اول باید یوزرنیمت رو ثبت کنی، /start رو بزن.", show_alert=True)
-        return
-
-    username = reg["username"]
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last_spin_str = await customer_storage.get_last_spin(user_id)
-    if last_spin_str:
-        last_spin = datetime.datetime.fromisoformat(last_spin_str)
-        elapsed = now - last_spin
-        if elapsed.total_seconds() < SPIN_COOLDOWN_DAYS * 86400:
-            remaining = datetime.timedelta(days=SPIN_COOLDOWN_DAYS) - elapsed
-            hours_left = int(remaining.total_seconds() // 3600)
-            await call.answer(f"⏳ هنوز زوده! حدود {hours_left} ساعت دیگه دوباره امتحان کن.", show_alert=True)
-            return
-
-    try:
-        user = await marzban.get_user(username)
-    except MarzbanError:
-        await call.answer("حساب VPN‌ت پیدا نشد، احتمالاً حذف شده. با پشتیبانی هماهنگ کن.", show_alert=True)
-        return
-    if user.get("status") != "active":
-        await call.answer("حساب VPN‌ت فعال نیست، پس فعلاً نمی‌تونی شانس بزنی.", show_alert=True)
-        return
-
-    reward_gb = random.choice(SPIN_REWARDS_GB)
-    try:
-        await marzban.add_data_gb(username, reward_gb)
-    except MarzbanError as e:
-        await call.answer(f"خطا: {e}", show_alert=True)
-        return
-
-    await customer_storage.set_last_spin(user_id, now.isoformat())
-    await call.message.answer(
-        f"🎉 تبریک! <b>{reward_gb}GB</b> حجم اضافه به حسابت اضافه شد.\nهفته‌ی بعد دوباره امتحان کن.",
-        parse_mode="HTML",
-    )
-    await call.answer("🎉 برنده شدی!")
+    nodes_text = await get_nodes_status_text()
+    text = f"سلام! 👋\n\n🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
+    await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "main_menu")
@@ -372,6 +281,8 @@ async def cb_main_menu(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="HTML")
     await call.answer()
 
+
+# ---------- افزودن کاربر ----------
 
 @router.callback_query(F.data == "add_user")
 @admin_only
@@ -476,6 +387,8 @@ async def loc_confirm_add(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+# ---------- لیست کاربران ----------
+
 @router.callback_query(F.data.startswith("list_users:"))
 @admin_only
 async def cb_list_users(call: CallbackQuery, state: FSMContext):
@@ -523,6 +436,8 @@ async def cb_user_detail(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+# ---------- کپی همه کانفیگ‌ها ----------
+
 @router.callback_query(F.data.startswith("copyconfigs:"))
 @admin_only
 async def cb_copy_configs(call: CallbackQuery, state: FSMContext):
@@ -559,6 +474,8 @@ async def cb_copy_configs(call: CallbackQuery, state: FSMContext):
     await call.message.answer(text, parse_mode="HTML")
     await call.answer("کانفیگ‌ها ارسال شد ✅")
 
+
+# ---------- ویرایش لوکیشن ----------
 
 @router.callback_query(F.data.startswith("editloc:"))
 @admin_only
@@ -630,6 +547,8 @@ async def loc_confirm_edit(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+# ---------- افزودن روز ----------
+
 @router.callback_query(F.data.startswith("extend:"))
 @admin_only
 async def cb_extend(call: CallbackQuery, state: FSMContext):
@@ -663,41 +582,7 @@ async def extend_days(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("reduceday:"))
-@admin_only
-async def cb_reduce_day(call: CallbackQuery, state: FSMContext):
-    username = call.data.split(":", 1)[1]
-    await state.update_data(username=username)
-    await state.set_state(ReduceDays.days)
-    await call.message.edit_text(f"چند روز از اعتبار «{username}» کم بشه؟", reply_markup=cancel_kb())
-    await call.answer()
-
-
-@router.message(ReduceDays.days)
-@admin_only
-async def reduce_days(message: Message, state: FSMContext):
-    try:
-        days = int(message.text.strip())
-    except ValueError:
-        await message.answer("یک عدد صحیح بفرست:")
-        return
-    if days <= 0:
-        await message.answer("یک عدد مثبت بفرست:")
-        return
-    data = await state.get_data()
-    username = data["username"]
-    await state.clear()
-    try:
-        user = await marzban.subtract_days(username, days)
-    except MarzbanError as e:
-        await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
-        return
-    await message.answer(
-        f"✅ انجام شد.\n\n{await user_summary(user)}",
-        reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
-    )
-
+# ---------- افزودن حجم ----------
 
 @router.callback_query(F.data.startswith("adddata:"))
 @admin_only
@@ -732,41 +617,7 @@ async def adddata_gb(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("reducedata:"))
-@admin_only
-async def cb_reduce_data(call: CallbackQuery, state: FSMContext):
-    username = call.data.split(":", 1)[1]
-    await state.update_data(username=username)
-    await state.set_state(ReduceDataUser.gb)
-    await call.message.edit_text(f"چند گیگابایت از حجم «{username}» کم بشه؟", reply_markup=cancel_kb())
-    await call.answer()
-
-
-@router.message(ReduceDataUser.gb)
-@admin_only
-async def reduce_data_gb(message: Message, state: FSMContext):
-    try:
-        gb = float(message.text.strip())
-    except ValueError:
-        await message.answer("یک عدد معتبر بفرست:")
-        return
-    if gb <= 0:
-        await message.answer("یک عدد مثبت بفرست:")
-        return
-    data = await state.get_data()
-    username = data["username"]
-    await state.clear()
-    try:
-        user = await marzban.subtract_data_gb(username, gb)
-    except MarzbanError as e:
-        await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
-        return
-    await message.answer(
-        f"✅ انجام شد.\n\n{await user_summary(user)}",
-        reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
-    )
-
+# ---------- ریست مصرف ----------
 
 @router.callback_query(F.data.startswith("reset:"))
 @admin_only
@@ -777,6 +628,8 @@ async def cb_reset(call: CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
+
+# ---------- فعال/غیرفعال ----------
 
 @router.callback_query(F.data.startswith("toggle:"))
 @admin_only
@@ -798,6 +651,8 @@ async def cb_toggle(call: CallbackQuery, state: FSMContext):
     await call.answer("انجام شد ✅")
 
 
+# ---------- حذف ----------
+
 @router.callback_query(F.data.startswith("delete:"))
 @admin_only
 async def cb_delete(call: CallbackQuery, state: FSMContext):
@@ -808,6 +663,8 @@ async def cb_delete(call: CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
+
+# ---------- لینک اشتراک ----------
 
 @router.callback_query(F.data.startswith("link:"))
 @admin_only
@@ -824,6 +681,8 @@ async def cb_link(call: CallbackQuery, state: FSMContext):
     await call.message.answer(f"🔗 لینک اشتراک «{username}»:\n<code>{sub_url}</code>", parse_mode="HTML")
     await call.answer()
 
+
+# ---------- تایید عملیات‌های خطرناک ----------
 
 @router.callback_query(F.data.startswith("confirm:"))
 @admin_only
@@ -844,6 +703,8 @@ async def cb_confirm(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
     await call.answer()
 
+
+# ---------- وضعیت سیستم ----------
 
 @router.callback_query(F.data == "system_stats")
 @admin_only
@@ -888,6 +749,8 @@ async def cb_system_stats(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("\n".join(lines), reply_markup=main_menu_kb(), parse_mode="HTML")
     await call.answer()
 
+
+# --- کارهای پس‌زمینه ---
 
 ALERT_CHECK_INTERVAL = 60 * 60
 DATA_ALERT_THRESHOLD = 0.9
