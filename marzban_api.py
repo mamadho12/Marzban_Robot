@@ -1,6 +1,3 @@
-"""
-کلاینت ساده برای API پنل مرزبان (Marzban).
-"""
 import time
 from typing import Optional
 
@@ -74,7 +71,6 @@ class MarzbanAPI:
         return await self._request("GET", "/api/inbounds")
 
     async def get_nodes(self):
-        """لیست نودها و وضعیت‌شون"""
         return await self._request("GET", "/api/nodes")
 
     async def _default_proxies_and_inbounds(self):
@@ -87,7 +83,7 @@ class MarzbanAPI:
             proxies[protocol] = {}
             inbounds[protocol] = [ib["tag"] for ib in inbound_list]
         if not proxies:
-            raise MarzbanError("هیچ این‌باندی روی نود پیدا نشد؛ اول یک این‌باند در پنل مرزبان تعریف کن.")
+            raise MarzbanError("هیچ این‌باندی روی نود پیدا نشد")
         return proxies, inbounds
 
     async def _proxies_and_inbounds_for_locations(self, location_names: list[str]):
