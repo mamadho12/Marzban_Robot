@@ -17,6 +17,7 @@ MARZBAN_PASSWORD = os.getenv("MARZBAN_PASSWORD", "")
 LOCATIONS = {
     "🇺🇸 لوکیشن آمریکا": ["VLESS-WS"],
     "🇳🇱 لوکیشن هلند": ["VLESS-WS-2"],
+    "🇸🇬 لوکیشن سنگاپور": ["VLESS-WS-3"],
 }
 
 if not BOT_TOKEN:
