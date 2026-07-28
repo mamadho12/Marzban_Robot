@@ -154,10 +154,33 @@ class MarzbanAPI:
         new_expire = base + days * 86400
         return await self.modify_user(username, expire=new_expire)
 
+    async def subtract_days(self, username: str, days: int):
+        user = await self.get_user(username)
+        current_expire = user.get("expire") or 0
+        if not current_expire:
+            raise MarzbanError("این کاربر تاریخ انقضای نامحدود داره، چیزی برای کم‌کردن نیست.")
+        new_expire = current_expire - days * 86400
+        now = int(time.time())
+        if new_expire < now:
+            # به‌جای منفی‌شدن (که بی‌معنیه)، همین الان منقضی‌ش می‌کنیم
+            new_expire = now
+        return await self.modify_user(username, expire=new_expire)
+
     async def add_data_gb(self, username: str, gb: float):
         user = await self.get_user(username)
         current_limit = user.get("data_limit") or 0
         new_limit = current_limit + int(gb * 1024 ** 3)
+        return await self.modify_user(username, data_limit=new_limit)
+
+    async def subtract_data_gb(self, username: str, gb: float):
+        user = await self.get_user(username)
+        current_limit = user.get("data_limit") or 0
+        if not current_limit:
+            raise MarzbanError("این کاربر حجم نامحدود داره، چیزی برای کم‌کردن نیست.")
+        new_limit = current_limit - int(gb * 1024 ** 3)
+        if new_limit <= 0:
+            # مقدار ۰ توی مرزبان یعنی «نامحدود»، پس هیچ‌وقت نباید دقیقاً صفرش کنیم
+            new_limit = 1
         return await self.modify_user(username, data_limit=new_limit)
 
     async def get_system_stats(self):
