@@ -133,18 +133,25 @@ def get_user_locations(user: dict) -> list[str]:
 
 
 def detect_location_from_config(config_line: str) -> str | None:
-    """از روی کانفیگ تشخیص می‌ده مال کدوم لوکیشنه (بر اساس path یا port)"""
+    """از روی کانفیگ تشخیص می‌ده مال کدوم لوکیشنه (بر اساس path)"""
     line = config_line.lower()
-    # اول path رو چک می‌کنیم (مطابق کانفیگ core)
+
+    # اولویت با path هست (چون همه روی پورت ۴۴۳ هستن)
+    if "path=%2fvless3" in line or "path=/vless3" in line or "path=%2Fvless3" in line:
+        return "🇸🇬 لوکیشن سنگاپور"
     if "path=%2fvless2" in line or "path=/vless2" in line or "path=%2Fvless2" in line:
         return "🇳🇱 لوکیشن هلند"
     if "path=%2fvless" in line or "path=/vless" in line or "path=%2Fvless" in line:
         return "🇺🇸 لوکیشن آمریکا"
-    # fallback روی پورت
+
+    # fallback روی پورت (اگه هنوز از پورت‌های قدیمی استفاده بشه)
+    if ":2053" in line:
+        return "🇸🇬 لوکیشن سنگاپور"
     if ":8443" in line:
         return "🇳🇱 لوکیشن هلند"
     if ":443" in line:
         return "🇺🇸 لوکیشن آمریکا"
+
     return None
 
 
