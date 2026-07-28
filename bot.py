@@ -4,7 +4,6 @@ import logging
 import datetime
 import json
 import base64
-import re
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
@@ -133,10 +132,8 @@ def get_user_locations(user: dict) -> list[str]:
 
 
 def detect_location_from_config(config_line: str) -> str | None:
-    """از روی کانفیگ تشخیص می‌ده مال کدوم لوکیشنه (بر اساس path)"""
     line = config_line.lower()
 
-    # اولویت با path هست (چون همه روی پورت ۴۴۳ هستن)
     if "path=%2fvless3" in line or "path=/vless3" in line or "path=%2Fvless3" in line:
         return "🇸🇬 لوکیشن سنگاپور"
     if "path=%2fvless2" in line or "path=/vless2" in line or "path=%2Fvless2" in line:
@@ -144,7 +141,6 @@ def detect_location_from_config(config_line: str) -> str | None:
     if "path=%2fvless" in line or "path=/vless" in line or "path=%2Fvless" in line:
         return "🇺🇸 لوکیشن آمریکا"
 
-    # fallback روی پورت (اگه هنوز از پورت‌های قدیمی استفاده بشه)
     if ":2053" in line:
         return "🇸🇬 لوکیشن سنگاپور"
     if ":8443" in line:
@@ -156,9 +152,6 @@ def detect_location_from_config(config_line: str) -> str | None:
 
 
 async def extract_configs_by_location(user: dict) -> dict[str, list[str]]:
-    """
-    کانفیگ‌های کاربر رو از لینک اشتراک می‌گیره و بر اساس لوکیشن دسته‌بندی می‌کنه.
-    """
     result = {name: [] for name in LOCATIONS}
 
     sub_url = user.get("subscription_url", "")
@@ -169,9 +162,7 @@ async def extract_configs_by_location(user: dict) -> dict[str, list[str]]:
     if not content:
         return result
 
-    # تلاش برای دیکود base64 (اگه لازم باشه)
     try:
-        # بعضی وقتا محتوای اشتراک خودش base64 هست
         decoded = base64.b64decode(content.strip() + "==").decode("utf-8", errors="ignore")
         if "vless://" in decoded or "vmess://" in decoded or "trojan://" in decoded:
             content = decoded
@@ -188,12 +179,30 @@ async def extract_configs_by_location(user: dict) -> dict[str, list[str]]:
         if loc and loc in result:
             result[loc].append(line)
         else:
-            # اگه نتونستیم لوکیشن رو تشخیص بدیم، به اولین لوکیشن فعال کاربر می‌دیم
             user_locs = get_user_locations(user)
             if user_locs:
                 result[user_locs[0]].append(line)
 
     return result
+
+
+async def get_nodes_status_text() -> str:
+    try:
+        nodes = await marzban.get_nodes()
+    except Exception:
+        return "📍 وضعیت نودها: در دسترس نیست"
+
+    if not nodes:
+        return "📍 هیچ نودی پیدا نشد"
+
+    lines = ["📍 <b>وضعیت نودها:</b>"]
+    for node in nodes:
+        name = node.get("name", "بدون‌نام")
+        status = node.get("status", "unknown")
+        icon = "🟢" if status == "connected" else "🔴"
+        lines.append(f"{icon} {name}")
+
+    return "\n".join(lines)
 
 
 async def user_summary(user: dict) -> str:
@@ -231,7 +240,6 @@ async def user_summary(user: dict) -> str:
         f"📍 لوکیشن‌ها:  <b>{loc_text}</b>",
     ]
 
-        # ---------- کانفیگ‌ها ----------
     try:
         configs_by_loc = await extract_configs_by_location(user)
         has_any = any(configs_by_loc.values())
@@ -243,7 +251,6 @@ async def user_summary(user: dict) -> str:
                     continue
                 lines.append(f"\n{loc_name}:")
                 for conf in confs:
-                    # کانفیگ کامل نشون داده می‌شه (بدون کوتاه کردن)
                     lines.append(f"<code>{conf}</code>")
     except Exception:
         pass
@@ -256,21 +263,22 @@ async def user_summary(user: dict) -> str:
 
 # ---------- شروع و منو ----------
 
-MAIN_MENU_TEXT = "🛡 <b>پنل مدیریت مرزبان</b>\nیکی از گزینه‌ها رو انتخاب کن:"
-
-
 @router.message(Command("start"))
 @admin_only
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(f"سلام! 👋\n\n{MAIN_MENU_TEXT}", reply_markup=main_menu_kb(), parse_mode="HTML")
+    nodes_text = await get_nodes_status_text()
+    text = f"سلام! 👋\n\n🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
+    await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "main_menu")
 @admin_only
 async def cb_main_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
-    await call.message.edit_text(MAIN_MENU_TEXT, reply_markup=main_menu_kb(), parse_mode="HTML")
+    nodes_text = await get_nodes_status_text()
+    text = f"🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
+    await call.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="HTML")
     await call.answer()
 
 
@@ -326,7 +334,7 @@ async def add_user_expire(message: Message, state: FSMContext):
     await state.update_data(selected_locations=set())
 
     await message.answer(
-        "لوکیشن‌های مورد نظر رو انتخاب کن (می‌تونی یکی یا هر دو رو بزنی):",
+        "لوکیشن‌های مورد نظر رو انتخاب کن (می‌تونی یکی یا چند تا رو بزنی):",
         reply_markup=location_kb(set(), confirm_cb="loc_confirm_add")
     )
 
@@ -426,6 +434,45 @@ async def cb_user_detail(call: CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await call.answer()
+
+
+# ---------- کپی همه کانفیگ‌ها ----------
+
+@router.callback_query(F.data.startswith("copyconfigs:"))
+@admin_only
+async def cb_copy_configs(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    try:
+        user = await marzban.get_user(username)
+    except MarzbanError as e:
+        await call.answer(f"خطا: {e}", show_alert=True)
+        return
+
+    try:
+        configs_by_loc = await extract_configs_by_location(user)
+    except Exception:
+        await call.answer("خطا در دریافت کانفیگ‌ها", show_alert=True)
+        return
+
+    has_any = any(configs_by_loc.values())
+    if not has_any:
+        await call.answer("هیچ کانفیگی پیدا نشد", show_alert=True)
+        return
+
+    lines = [f"📄 <b>همه کانفیگ‌های {username}</b>\n"]
+    for loc_name, confs in configs_by_loc.items():
+        if not confs:
+            continue
+        lines.append(f"\n{loc_name}:")
+        for conf in confs:
+            lines.append(f"<code>{conf}</code>")
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3900] + "\n\n... (پیام خیلی طولانی بود)"
+
+    await call.message.answer(text, parse_mode="HTML")
+    await call.answer("کانفیگ‌ها ارسال شد ✅")
 
 
 # ---------- ویرایش لوکیشن ----------
@@ -657,7 +704,7 @@ async def cb_confirm(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-# ---------- وضعیت سیستم (با آمار لوکیشن) ----------
+# ---------- وضعیت سیستم ----------
 
 @router.callback_query(F.data == "system_stats")
 @admin_only
@@ -671,79 +718,7 @@ async def cb_system_stats(call: CallbackQuery, state: FSMContext):
         return
 
     total_traffic = fmt_bytes((stats.get("incoming_bandwidth", 0) or 0) + (stats.get("outgoing_bandwidth", 0) or 0))
-    mem_used = fmt_bytes(stats.get("mem_used", 0) or 0)
-    mem_total = fmt_bytes(stats.get("mem_total", 0) or 0)
-
-    # آمار به تفکیک لوکیشن
-    loc_stats = {name: {"total": 0, "online": 0} for name in LOCATIONS}
-    for u in all_users:
-        locs = get_user_locations(u)
-        online = is_online(u)
-        for loc in locs:
-            if loc in loc_stats:
-                loc_stats[loc]["total"] += 1
-                if online:
-                    loc_stats[loc]["online"] += 1
-
-    lines = [
-        "📊 <b>وضعیت سیستم</b>",
-        "",
-        f"👥 کاربران کل: <code>{stats.get('total_user', '-')}</code>",
-        f"✅ کاربران فعال: <code>{stats.get('users_active', '-')}</code>",
-        f"📶 مصرف کل ترافیک: <code>{total_traffic}</code>",
-        f"💾 مصرف رم: <code>{mem_used} / {mem_total}</code>",
-        f"⚙️ هسته‌های CPU: <code>{stats.get('cpu_cores', '-')}</code>  |  بار: <code>{stats.get('cpu_usage', '-')}%</code>",
-        "",
-        "📍 <b>آمار به تفکیک لوکیشن:</b>",
-    ]
-
-    for loc_name, data in loc_stats.items():
-        lines.append(f"{loc_name}:  {data['online']} آنلاین از {data['total']} کاربر")
-
-    await call.message.edit_text("\n".join(lines), reply_markup=main_menu_kb(), parse_mode="HTML")
-    await call.answer()
-
-
-# --- کارهای پس‌زمینه ---
-
-ALERT_CHECK_INTERVAL = 60 * 60
-DATA_ALERT_THRESHOLD = 0.9
-EXPIRE_ALERT_HOURS = 24
-BACKUP_HOUR_UTC = 3
-
-_alerted = set()
-
-
-async def _check_alerts(bot: Bot):
-    try:
-        users = await marzban.list_all_users()
-    except MarzbanError:
-        return
-
-    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-    lines = []
-    active_keys = set()
-
-    for u in users:
-        if u.get("status") != "active":
-            continue
-        username = u.get("username")
-        limit = u.get("data_limit") or 0
-        used = u.get("used_traffic") or 0
-        expire = u.get("expire") or 0
-
-        if limit and used / limit >= DATA_ALERT_THRESHOLD:
-            key = (username, "data")
-            active_keys.add(key)
-            if key not in _alerted:
-                lines.append(f"📦 «{username}» حجمش داره تموم می‌شه: <code>{fmt_bytes(used)} / {fmt_bytes(limit)}</code>")
-
-        if expire and 0 < (expire - now) <= EXPIRE_ALERT_HOURS * 3600:
-            key = (username, "expire")
-            active_keys.add(key)
-            if key not in _alerted:
-                hours_left = int((expire - now) / 3600)
-                lines.append(f"📅 «{username}» کمتر از {hours_left} ساعت تا انقضا داره")
+    mem_used = fmt_bytes(stats.get("memhours_left} ساعت تا انقضا داره")
 
     _alerted.intersection_update(active_keys)
     _alerted.update(active_keys)
