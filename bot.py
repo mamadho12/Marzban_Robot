@@ -261,8 +261,6 @@ async def user_summary(user: dict) -> str:
     return "\n".join(lines)
 
 
-# ---------- شروع و منو ----------
-
 @router.message(Command("start"))
 @admin_only
 async def cmd_start(message: Message, state: FSMContext):
@@ -281,8 +279,6 @@ async def cb_main_menu(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="HTML")
     await call.answer()
 
-
-# ---------- افزودن کاربر ----------
 
 @router.callback_query(F.data == "add_user")
 @admin_only
@@ -387,8 +383,6 @@ async def loc_confirm_add(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-# ---------- لیست کاربران ----------
-
 @router.callback_query(F.data.startswith("list_users:"))
 @admin_only
 async def cb_list_users(call: CallbackQuery, state: FSMContext):
@@ -436,8 +430,6 @@ async def cb_user_detail(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-# ---------- کپی همه کانفیگ‌ها ----------
-
 @router.callback_query(F.data.startswith("copyconfigs:"))
 @admin_only
 async def cb_copy_configs(call: CallbackQuery, state: FSMContext):
@@ -474,8 +466,6 @@ async def cb_copy_configs(call: CallbackQuery, state: FSMContext):
     await call.message.answer(text, parse_mode="HTML")
     await call.answer("کانفیگ‌ها ارسال شد ✅")
 
-
-# ---------- ویرایش لوکیشن ----------
 
 @router.callback_query(F.data.startswith("editloc:"))
 @admin_only
@@ -547,8 +537,6 @@ async def loc_confirm_edit(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-# ---------- افزودن روز ----------
-
 @router.callback_query(F.data.startswith("extend:"))
 @admin_only
 async def cb_extend(call: CallbackQuery, state: FSMContext):
@@ -581,8 +569,6 @@ async def extend_days(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-
-# ---------- افزودن حجم ----------
 
 @router.callback_query(F.data.startswith("adddata:"))
 @admin_only
@@ -617,8 +603,6 @@ async def adddata_gb(message: Message, state: FSMContext):
     )
 
 
-# ---------- ریست مصرف ----------
-
 @router.callback_query(F.data.startswith("reset:"))
 @admin_only
 async def cb_reset(call: CallbackQuery, state: FSMContext):
@@ -628,8 +612,6 @@ async def cb_reset(call: CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
-
-# ---------- فعال/غیرفعال ----------
 
 @router.callback_query(F.data.startswith("toggle:"))
 @admin_only
@@ -651,8 +633,6 @@ async def cb_toggle(call: CallbackQuery, state: FSMContext):
     await call.answer("انجام شد ✅")
 
 
-# ---------- حذف ----------
-
 @router.callback_query(F.data.startswith("delete:"))
 @admin_only
 async def cb_delete(call: CallbackQuery, state: FSMContext):
@@ -663,8 +643,6 @@ async def cb_delete(call: CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
-
-# ---------- لینک اشتراک ----------
 
 @router.callback_query(F.data.startswith("link:"))
 @admin_only
@@ -681,8 +659,6 @@ async def cb_link(call: CallbackQuery, state: FSMContext):
     await call.message.answer(f"🔗 لینک اشتراک «{username}»:\n<code>{sub_url}</code>", parse_mode="HTML")
     await call.answer()
 
-
-# ---------- تایید عملیات‌های خطرناک ----------
 
 @router.callback_query(F.data.startswith("confirm:"))
 @admin_only
@@ -703,8 +679,6 @@ async def cb_confirm(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
     await call.answer()
 
-
-# ---------- وضعیت سیستم ----------
 
 @router.callback_query(F.data == "system_stats")
 @admin_only
@@ -749,8 +723,6 @@ async def cb_system_stats(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("\n".join(lines), reply_markup=main_menu_kb(), parse_mode="HTML")
     await call.answer()
 
-
-# --- کارهای پس‌زمینه ---
 
 ALERT_CHECK_INTERVAL = 60 * 60
 DATA_ALERT_THRESHOLD = 0.9
