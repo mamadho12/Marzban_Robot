@@ -224,7 +224,7 @@ async def user_summary(user: dict) -> str:
         f"📍 لوکیشن‌ها:  <b>{loc_text}</b>",
     ]
 
-    # ---------- کانفیگ‌ها ----------
+        # ---------- کانفیگ‌ها ----------
     try:
         configs_by_loc = await extract_configs_by_location(user)
         has_any = any(configs_by_loc.values())
@@ -236,9 +236,8 @@ async def user_summary(user: dict) -> str:
                     continue
                 lines.append(f"\n{loc_name}:")
                 for conf in confs:
-                    # برای جلوگیری از خیلی طولانی شدن پیام
-                    short = conf if len(conf) < 180 else conf[:160] + "..."
-                    lines.append(f"<code>{short}</code>")
+                    # کانفیگ کامل نشون داده می‌شه (بدون کوتاه کردن)
+                    lines.append(f"<code>{conf}</code>")
     except Exception:
         pass
 
