@@ -38,10 +38,6 @@ def user_detail_kb(username: str, status: str = "active") -> InlineKeyboardMarku
         InlineKeyboardButton(text="افزودن حجم", callback_data=f"adddata:{username}"),
     )
     b.row(
-        InlineKeyboardButton(text="➖ کم‌کردن روز", callback_data=f"reduceday:{username}"),
-        InlineKeyboardButton(text="➖ کم‌کردن حجم", callback_data=f"reducedata:{username}"),
-    )
-    b.row(
         InlineKeyboardButton(text="ریست مصرف", callback_data=f"reset:{username}"),
         InlineKeyboardButton(text="لینک اشتراک", callback_data=f"link:{username}"),
     )
@@ -77,12 +73,6 @@ def confirm_kb(action: str, username: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="بله", callback_data=f"confirm:{action}:{username}"),
         InlineKeyboardButton(text="نه", callback_data=f"user:{username}"),
     )
-    return b.as_markup()
-
-
-def customer_menu_kb() -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="🎰 شانس هفتگی", callback_data="spin"))
     return b.as_markup()
 
 
