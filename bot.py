@@ -437,4 +437,264 @@ async def extend_days(message: Message, state: FSMContext):
     try:
         days = int(message.text.strip())
     except ValueError:
-        await message.answer("
+        await message.answer("یک عدد صحیح بفرست:")
+        return
+    data = await state.get_data()
+    username = data["username"]
+    await state.clear()
+    try:
+        user = await marzban.add_days(username, days)
+    except MarzbanError as e:
+        await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
+        return
+    await message.answer(
+        f"✅ انجام شد.\n\n{user_summary(user)}",
+        reply_markup=user_detail_kb(username, user.get("status", "active")),
+        parse_mode="HTML"
+    )
+
+
+# ---------- افزودن حجم ----------
+
+@router.callback_query(F.data.startswith("adddata:"))
+@admin_only
+async def cb_adddata(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    await state.update_data(username=username)
+    await state.set_state(AddDataUser.gb)
+    await call.message.edit_text(f"چند گیگابایت به حجم «{username}» اضافه بشه؟", reply_markup=cancel_kb())
+    await call.answer()
+
+
+@router.message(AddDataUser.gb)
+@admin_only
+async def adddata_gb(message: Message, state: FSMContext):
+    try:
+        gb = float(message.text.strip())
+    except ValueError:
+        await message.answer("یک عدد معتبر بفرست:")
+        return
+    data = await state.get_data()
+    username = data["username"]
+    await state.clear()
+    try:
+        user = await marzban.add_data_gb(username, gb)
+    except MarzbanError as e:
+        await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
+        return
+    await message.answer(
+        f"✅ انجام شد.\n\n{user_summary(user)}",
+        reply_markup=user_detail_kb(username, user.get("status", "active")),
+        parse_mode="HTML"
+    )
+
+
+# ---------- ریست مصرف ----------
+
+@router.callback_query(F.data.startswith("reset:"))
+@admin_only
+async def cb_reset(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        f"مطمئنی می‌خوای مصرف «{username}» صفر بشه؟", reply_markup=confirm_kb("reset", username)
+    )
+    await call.answer()
+
+
+# ---------- فعال/غیرفعال ----------
+
+@router.callback_query(F.data.startswith("toggle:"))
+@admin_only
+async def cb_toggle(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    try:
+        user = await marzban.get_user(username)
+        new_status = "disabled" if user.get("status") == "active" else "active"
+        user = await marzban.modify_user(username, status=new_status)
+    except MarzbanError as e:
+        await call.message.edit_text(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
+        await call.answer()
+        return
+    await call.message.edit_text(
+        user_summary(user),
+        reply_markup=user_detail_kb(username, user.get("status", "active")),
+        parse_mode="HTML"
+    )
+    await call.answer("انجام شد ✅")
+
+
+# ---------- حذف ----------
+
+@router.callback_query(F.data.startswith("delete:"))
+@admin_only
+async def cb_delete(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        f"⚠️ مطمئنی می‌خوای «{username}» رو کامل حذف کنی؟ این کار برگشت‌ناپذیره.",
+        reply_markup=confirm_kb("delete", username),
+    )
+    await call.answer()
+
+
+# ---------- لینک اشتراک ----------
+
+@router.callback_query(F.data.startswith("link:"))
+@admin_only
+async def cb_link(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    try:
+        user = await marzban.get_user(username)
+    except MarzbanError as e:
+        await call.answer(f"خطا: {e}", show_alert=True)
+        return
+    sub_url = user.get("subscription_url", "")
+    if sub_url and sub_url.startswith("/"):
+        sub_url = MARZBAN_URL + sub_url
+    await call.message.answer(f"🔗 لینک اشتراک «{username}»:\n<code>{sub_url}</code>", parse_mode="HTML")
+    await call.answer()
+
+
+# ---------- تایید عملیات‌های خطرناک ----------
+
+@router.callback_query(F.data.startswith("confirm:"))
+@admin_only
+async def cb_confirm(call: CallbackQuery, state: FSMContext):
+    _, action, username = call.data.split(":", 2)
+    try:
+        if action == "delete":
+            await marzban.delete_user(username)
+            await call.message.edit_text(f"🗑 کاربر «{username}» حذف شد.", reply_markup=main_menu_kb())
+        elif action == "reset":
+            user = await marzban.reset_user_data(username)
+            await call.message.edit_text(
+                f"🔄 مصرف «{username}» ریست شد.\n\n{user_summary(user)}",
+                reply_markup=user_detail_kb(username, user.get("status", "active")),
+                parse_mode="HTML",
+            )
+    except MarzbanError as e:
+        await call.message.edit_text(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
+    await call.answer()
+
+
+# ---------- وضعیت سیستم ----------
+
+@router.callback_query(F.data == "system_stats")
+@admin_only
+async def cb_system_stats(call: CallbackQuery, state: FSMContext):
+    try:
+        stats = await marzban.get_system_stats()
+    except MarzbanError as e:
+        await call.message.edit_text(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
+        await call.answer()
+        return
+    total_traffic = fmt_bytes((stats.get("incoming_bandwidth", 0) or 0) + (stats.get("outgoing_bandwidth", 0) or 0))
+    mem_used = fmt_bytes(stats.get("mem_used", 0) or 0)
+    mem_total = fmt_bytes(stats.get("mem_total", 0) or 0)
+    lines = [
+        "📊 <b>وضعیت سیستم</b>",
+        "",
+        f"👥 کاربران کل: <code>{stats.get('total_user', '-')}</code>",
+        f"✅ کاربران فعال: <code>{stats.get('users_active', '-')}</code>",
+        f"📶 مصرف کل ترافیک: <code>{total_traffic}</code>",
+        f"💾 مصرف رم: <code>{mem_used} / {mem_total}</code>",
+        f"⚙️ هسته‌های CPU: <code>{stats.get('cpu_cores', '-')}</code>  |  بار: <code>{stats.get('cpu_usage', '-')}%</code>",
+    ]
+    await call.message.edit_text("\n".join(lines), reply_markup=main_menu_kb(), parse_mode="HTML")
+    await call.answer()
+
+
+# --- کارهای پس‌زمینه: هشدار خودکار + بک‌آپ روزانه ---
+
+ALERT_CHECK_INTERVAL = 60 * 60      # هر ۱ ساعت چک کن
+DATA_ALERT_THRESHOLD = 0.9          # وقتی ۹۰٪ حجم مصرف شد هشدار بده
+EXPIRE_ALERT_HOURS = 24             # وقتی کمتر از ۲۴ ساعت به انقضا مونده هشدار بده
+BACKUP_HOUR_UTC = 3                 # ساعت ارسال بک‌آپ روزانه (به وقت UTC)
+
+# جلوگیری از هشدار تکراری برای یه وضعیت مشابه (تا وقتی ری‌استارت نشه یا خودش رفع نشه)
+_alerted = set()
+
+
+async def _check_alerts(bot: Bot):
+    try:
+        users = await marzban.list_all_users()
+    except MarzbanError:
+        return
+
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    lines = []
+    active_keys = set()
+
+    for u in users:
+        if u.get("status") != "active":
+            continue
+        username = u.get("username")
+        limit = u.get("data_limit") or 0
+        used = u.get("used_traffic") or 0
+        expire = u.get("expire") or 0
+
+        if limit and used / limit >= DATA_ALERT_THRESHOLD:
+            key = (username, "data")
+            active_keys.add(key)
+            if key not in _alerted:
+                lines.append(f"📦 «{username}» حجمش داره تموم می‌شه: <code>{fmt_bytes(used)} / {fmt_bytes(limit)}</code>")
+
+        if expire and 0 < (expire - now) <= EXPIRE_ALERT_HOURS * 3600:
+            key = (username, "expire")
+            active_keys.add(key)
+            if key not in _alerted:
+                hours_left = int((expire - now) / 3600)
+                lines.append(f"📅 «{username}» کمتر از {hours_left} ساعت تا انقضا داره")
+
+    # اگه یه کاربر رفع شده (مثلاً حجمش اضافه شده)، دفعه‌ی بعد دوباره قابل هشداره
+    _alerted.intersection_update(active_keys)
+    _alerted.update(active_keys)
+
+    if lines:
+        text = "⚠️ <b>هشدار خودکار</b>\n\n" + "\n".join(lines)
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text, parse_mode="HTML")
+            except Exception:
+                pass
+
+
+async def _send_backup(bot: Bot):
+    try:
+        users = await marzban.list_all_users()
+    except MarzbanError:
+        return
+    payload = json.dumps(users, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    doc = BufferedInputFile(payload, filename=f"marzban-backup-{today}.json")
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_document(admin_id, doc, caption=f"🗄 بک‌آپ لیست کاربران — {today}")
+        except Exception:
+            pass
+
+
+async def background_jobs(bot: Bot):
+    last_backup_date = None
+    while True:
+        await _check_alerts(bot)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if now.hour == BACKUP_HOUR_UTC and last_backup_date != now.date():
+            await _send_backup(bot)
+            last_backup_date = now.date()
+        await asyncio.sleep(ALERT_CHECK_INTERVAL)
+
+
+async def main():
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+    asyncio.create_task(background_jobs(bot))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await marzban.close()
+        await bot.session.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
