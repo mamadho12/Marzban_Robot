@@ -38,6 +38,10 @@ def user_detail_kb(username: str, status: str = "active") -> InlineKeyboardMarku
         InlineKeyboardButton(text="افزودن حجم", callback_data=f"adddata:{username}"),
     )
     b.row(
+        InlineKeyboardButton(text="➖ کم‌کردن روز", callback_data=f"reduceday:{username}"),
+        InlineKeyboardButton(text="➖ کم‌کردن حجم", callback_data=f"reducedata:{username}"),
+    )
+    b.row(
         InlineKeyboardButton(text="ریست مصرف", callback_data=f"reset:{username}"),
         InlineKeyboardButton(text="لینک اشتراک", callback_data=f"link:{username}"),
     )
