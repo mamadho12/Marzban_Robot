@@ -18,3 +18,7 @@ class AddDataUser(StatesGroup):
 
 class EditLocation(StatesGroup):
     select = State()
+
+
+class CustomerRegister(StatesGroup):
+    username = State()
