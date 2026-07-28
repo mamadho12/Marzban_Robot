@@ -5,6 +5,7 @@ class AddUser(StatesGroup):
     username = State()
     data_limit = State()
     expire_days = State()
+    locations = State()          # جدید
 
 
 class ExtendUser(StatesGroup):
@@ -13,3 +14,7 @@ class ExtendUser(StatesGroup):
 
 class AddDataUser(StatesGroup):
     gb = State()
+
+
+class EditLocation(StatesGroup):
+    select = State()             # جدید
