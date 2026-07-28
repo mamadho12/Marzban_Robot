@@ -151,7 +151,6 @@ def detect_location_from_config(config_line: str) -> str | None:
 async def extract_configs_by_location(user: dict) -> dict[str, list[str]]:
     """
     کانفیگ‌های کاربر رو از لینک اشتراک می‌گیره و بر اساس لوکیشن دسته‌بندی می‌کنه.
-    خروجی: { "🇺🇸 لوکیشن آمریکا": ["vless://..."], ... }
     """
     result = {name: [] for name in LOCATIONS}
 
@@ -163,23 +162,26 @@ async def extract_configs_by_location(user: dict) -> dict[str, list[str]]:
     if not content:
         return result
 
-    # بعضی وقتا base64 هست
+    # تلاش برای دیکود base64 (اگه لازم باشه)
     try:
-        decoded = base64.b64decode(content.strip()).decode("utf-8", errors="ignore")
-        if "vless://" in decoded or "vmess://" in decoded:
+        # بعضی وقتا محتوای اشتراک خودش base64 هست
+        decoded = base64.b64decode(content.strip() + "==").decode("utf-8", errors="ignore")
+        if "vless://" in decoded or "vmess://" in decoded or "trojan://" in decoded:
             content = decoded
     except Exception:
         pass
 
-    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    lines = [l.strip() for l in content.replace("\r", "").split("\n") if l.strip()]
+    
     for line in lines:
         if not (line.startswith("vless://") or line.startswith("vmess://") or line.startswith("trojan://")):
             continue
+
         loc = detect_location_from_config(line)
         if loc and loc in result:
             result[loc].append(line)
         else:
-            # اگه نتونستیم تشخیص بدیم، به اولین لوکیشن فعال کاربر می‌دیم
+            # اگه نتونستیم لوکیشن رو تشخیص بدیم، به اولین لوکیشن فعال کاربر می‌دیم
             user_locs = get_user_locations(user)
             if user_locs:
                 result[user_locs[0]].append(line)
