@@ -1,6 +1,5 @@
 """
 کلاینت ساده برای API پنل مرزبان (Marzban).
-مستندات API معمولاً روی MARZBAN_URL/docs در دسترسه.
 """
 import time
 from typing import Optional
@@ -24,7 +23,6 @@ class MarzbanAPI:
         await self._client.aclose()
 
     async def _ensure_token(self):
-        # توکن رو کش می‌کنیم و کمی زودتر از انقضا رفرش می‌کنیم
         if self._token and time.time() < self._token_expiry:
             return
         resp = await self._client.post(
@@ -35,7 +33,6 @@ class MarzbanAPI:
             raise MarzbanError(f"ورود به پنل ناموفق بود ({resp.status_code}): {resp.text}")
         data = resp.json()
         self._token = data["access_token"]
-        # مرزبان معمولا مدت اعتبار مشخص نمی‌کنه، محافظه‌کارانه ۵۰ دقیقه در نظر می‌گیریم
         self._token_expiry = time.time() + 50 * 60
 
     async def _request(self, method: str, path: str, retry: bool = True, **kwargs):
@@ -44,7 +41,6 @@ class MarzbanAPI:
         headers["Authorization"] = f"Bearer {self._token}"
         resp = await self._client.request(method, path, headers=headers, **kwargs)
         if resp.status_code == 401 and retry:
-            # توکن رو باطل و یک بار دیگه امتحان کن
             self._token = None
             return await self._request(method, path, retry=False, **kwargs)
         if resp.status_code >= 400:
@@ -53,14 +49,11 @@ class MarzbanAPI:
             return None
         return resp.json()
 
-    # ---------- کاربران ----------
-
     async def list_users(self, offset: int = 0, limit: int = 50):
         data = await self._request("GET", "/api/users", params={"offset": offset, "limit": limit})
         return data.get("users", [])
 
     async def list_all_users(self):
-        """همه‌ی کاربرها رو صفحه‌به‌صفحه می‌گیره (برای هشدار و بک‌آپ)."""
         users = []
         offset = 0
         limit = 100
@@ -81,7 +74,6 @@ class MarzbanAPI:
         return await self._request("GET", "/api/inbounds")
 
     async def _default_proxies_and_inbounds(self):
-        """با توجه به این‌باندهای موجود روی سرور نود، proxies/inbounds پیش‌فرض رو می‌سازه."""
         inbounds_data = await self.get_inbounds()
         proxies = {}
         inbounds = {}
@@ -95,7 +87,6 @@ class MarzbanAPI:
         return proxies, inbounds
 
     async def _proxies_and_inbounds_for_locations(self, location_names: list[str]):
-        """ساخت proxies و inbounds فقط برای لوکیشن‌های انتخاب‌شده"""
         if not location_names:
             raise MarzbanError("حداقل یک لوکیشن باید انتخاب شود")
 
@@ -136,15 +127,14 @@ class MarzbanAPI:
         if data_limit_gb and data_limit_gb > 0:
             body["data_limit"] = int(data_limit_gb * 1024 ** 3)
         else:
-            body["data_limit"] = 0  # نامحدود
+            body["data_limit"] = 0
         if expire_days and expire_days > 0:
             body["expire"] = int(time.time()) + expire_days * 86400
         else:
-            body["expire"] = 0  # نامحدود
+            body["expire"] = 0
         return await self._request("POST", "/api/user", json=body)
 
     async def set_user_locations(self, username: str, location_names: list[str]):
-        """تغییر لوکیشن‌های یک کاربر موجود"""
         proxies, inbounds = await self._proxies_and_inbounds_for_locations(location_names)
         return await self.modify_user(username, proxies=proxies, inbounds=inbounds)
 
@@ -172,6 +162,22 @@ class MarzbanAPI:
 
     async def get_system_stats(self):
         return await self._request("GET", "/api/system")
+
+    async def fetch_subscription_content(self, sub_url: str) -> str:
+        """محتوای لینک اشتراک رو می‌گیره (برای استخراج کانفیگ‌ها)"""
+        if not sub_url:
+            return ""
+        # اگه نسبی باشه کاملش می‌کنیم
+        if sub_url.startswith("/"):
+            sub_url = MARZBAN_URL + sub_url
+        try:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                resp = await client.get(sub_url)
+                if resp.status_code == 200:
+                    return resp.text
+        except Exception:
+            pass
+        return ""
 
 
 marzban = MarzbanAPI()
