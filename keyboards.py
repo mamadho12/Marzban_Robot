@@ -12,6 +12,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 
 def users_list_kb(users: list[dict], offset: int, has_more: bool) -> InlineKeyboardMarkup:
+    """users: [{"username": str, "online": bool, "status": str}, ...]"""
     b = InlineKeyboardBuilder()
     for u in users:
         dot = "🟢" if u.get("online") else "⚪️"
@@ -43,7 +44,7 @@ def user_detail_kb(username: str, status: str = "active") -> InlineKeyboardMarku
     )
     status_toggle = "غیرفعال‌سازی" if status == "active" else "فعال‌سازی"
     b.row(InlineKeyboardButton(text=status_toggle, callback_data=f"toggle:{username}"))
-    b.row(InlineKeyboardButton(text="ویرایش لوکیشن", callback_data=f"editloc:{username}"))  # جدید
+    b.row(InlineKeyboardButton(text="ویرایش لوکیشن", callback_data=f"editloc:{username}"))
     b.row(InlineKeyboardButton(text="حذف کاربر", callback_data=f"delete:{username}"))
     b.row(InlineKeyboardButton(text="لیست کاربران", callback_data="list_users:0"))
     return b.as_markup()
