@@ -4,6 +4,7 @@ import logging
 import datetime
 import json
 import base64
+import random
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
@@ -14,9 +15,10 @@ from config import BOT_TOKEN, ADMIN_IDS, MARZBAN_URL, LOCATIONS
 from marzban_api import marzban, MarzbanError
 from keyboards import (
     main_menu_kb, users_list_kb, user_detail_kb,
-    confirm_kb, cancel_kb, location_kb,
+    confirm_kb, cancel_kb, location_kb, customer_menu_kb,
 )
-from states import AddUser, ExtendUser, AddDataUser, EditLocation
+from states import AddUser, ExtendUser, AddDataUser, EditLocation, CustomerRegister
+import customer_storage
 
 logging.basicConfig(level=logging.INFO)
 
@@ -262,12 +264,103 @@ async def user_summary(user: dict) -> str:
 
 
 @router.message(Command("start"))
-@admin_only
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
-    nodes_text = await get_nodes_status_text()
-    text = f"سلام! 👋\n\n🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
-    await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
+    user_id = message.from_user.id
+
+    if user_id in ADMIN_IDS:
+        nodes_text = await get_nodes_status_text()
+        text = f"سلام! 👋\n\n🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
+        await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
+        return
+
+    # ---- کاربر عادی (مشتری) ----
+    reg = await customer_storage.get_registration(user_id)
+    if reg:
+        await message.answer(
+            f"سلام! 👋\nحساب متصل: <code>{reg['username']}</code>\n\nهر هفته یه‌بار می‌تونی شانست رو امتحان کنی:",
+            reply_markup=customer_menu_kb(),
+            parse_mode="HTML",
+        )
+        return
+
+    await state.set_state(CustomerRegister.username)
+    await message.answer(
+        "سلام! 👋\nبرای اتصال به حساب VPN‌ت، یوزرنیمی که ازمون گرفتی رو بفرست:"
+    )
+
+
+@router.message(CustomerRegister.username)
+async def customer_register_username(message: Message, state: FSMContext):
+    username = message.text.strip()
+    user_id = message.from_user.id
+
+    try:
+        vpn_user = await marzban.get_user(username)
+    except MarzbanError:
+        await message.answer("همچین یوزرنیمی پیدا نشد. دوباره امتحان کن یا با پشتیبانی هماهنگ کن:")
+        return
+
+    owner = await customer_storage.find_owner_of_username(username)
+    if owner is not None and owner != user_id:
+        await message.answer("این یوزرنیم قبلاً به یه اکانت تلگرام دیگه وصل شده. اگه اشتباهیه با پشتیبانی هماهنگ کن.")
+        return
+
+    await customer_storage.register(user_id, username)
+    await state.clear()
+    await message.answer(
+        f"✅ وصل شد! حساب: <code>{vpn_user.get('username')}</code>\n\nهر هفته یه‌بار می‌تونی شانست رو امتحان کنی:",
+        reply_markup=customer_menu_kb(),
+        parse_mode="HTML",
+    )
+
+
+SPIN_COOLDOWN_DAYS = 7
+SPIN_REWARDS_GB = [0.1, 0.2, 0.3, 0.5]
+
+
+@router.callback_query(F.data == "spin")
+async def cb_spin(call: CallbackQuery, state: FSMContext):
+    user_id = call.from_user.id
+    reg = await customer_storage.get_registration(user_id)
+    if not reg:
+        await call.answer("اول باید یوزرنیمت رو ثبت کنی، /start رو بزن.", show_alert=True)
+        return
+
+    username = reg["username"]
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_spin_str = await customer_storage.get_last_spin(user_id)
+    if last_spin_str:
+        last_spin = datetime.datetime.fromisoformat(last_spin_str)
+        elapsed = now - last_spin
+        if elapsed.total_seconds() < SPIN_COOLDOWN_DAYS * 86400:
+            remaining = datetime.timedelta(days=SPIN_COOLDOWN_DAYS) - elapsed
+            hours_left = int(remaining.total_seconds() // 3600)
+            await call.answer(f"⏳ هنوز زوده! حدود {hours_left} ساعت دیگه دوباره امتحان کن.", show_alert=True)
+            return
+
+    try:
+        user = await marzban.get_user(username)
+    except MarzbanError:
+        await call.answer("حساب VPN‌ت پیدا نشد، احتمالاً حذف شده. با پشتیبانی هماهنگ کن.", show_alert=True)
+        return
+    if user.get("status") != "active":
+        await call.answer("حساب VPN‌ت فعال نیست، پس فعلاً نمی‌تونی شانس بزنی.", show_alert=True)
+        return
+
+    reward_gb = random.choice(SPIN_REWARDS_GB)
+    try:
+        await marzban.add_data_gb(username, reward_gb)
+    except MarzbanError as e:
+        await call.answer(f"خطا: {e}", show_alert=True)
+        return
+
+    await customer_storage.set_last_spin(user_id, now.isoformat())
+    await call.message.answer(
+        f"🎉 تبریک! <b>{reward_gb}GB</b> حجم اضافه به حسابت اضافه شد.\nهفته‌ی بعد دوباره امتحان کن.",
+        parse_mode="HTML",
+    )
+    await call.answer("🎉 برنده شدی!")
 
 
 @router.callback_query(F.data == "main_menu")
