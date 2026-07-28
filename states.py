@@ -5,7 +5,7 @@ class AddUser(StatesGroup):
     username = State()
     data_limit = State()
     expire_days = State()
-    locations = State()          # جدید
+    locations = State()          # انتخاب لوکیشن موقع ساخت
 
 
 class ExtendUser(StatesGroup):
@@ -17,4 +17,4 @@ class AddDataUser(StatesGroup):
 
 
 class EditLocation(StatesGroup):
-    select = State()             # جدید
+    select = State()             # ویرایش لوکیشن کاربر موجود
