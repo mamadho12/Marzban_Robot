@@ -2,13 +2,12 @@ import asyncio
 import functools
 import logging
 import datetime
-import json
 import base64
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, BufferedInputFile
+from aiogram.types import Message, CallbackQuery
 
 from config import BOT_TOKEN, ADMIN_IDS, MARZBAN_URL, LOCATIONS
 from marzban_api import marzban, MarzbanError
@@ -170,7 +169,7 @@ async def extract_configs_by_location(user: dict) -> dict[str, list[str]]:
         pass
 
     lines = [l.strip() for l in content.replace("\r", "").split("\n") if l.strip()]
-    
+
     for line in lines:
         if not (line.startswith("vless://") or line.startswith("vmess://") or line.startswith("trojan://")):
             continue
@@ -796,88 +795,10 @@ async def cb_system_stats(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-ALERT_CHECK_INTERVAL = 60 * 60
-DATA_ALERT_THRESHOLD = 0.9
-EXPIRE_ALERT_HOURS = 24
-BACKUP_HOUR_UTC = 3
-
-_alerted = set()
-
-
-async def _check_alerts(bot: Bot):
-    try:
-        users = await marzban.list_all_users()
-    except MarzbanError:
-        return
-
-    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-    lines = []
-    active_keys = set()
-
-    for u in users:
-        if u.get("status") != "active":
-            continue
-        username = u.get("username")
-        limit = u.get("data_limit") or 0
-        used = u.get("used_traffic") or 0
-        expire = u.get("expire") or 0
-
-        if limit and used / limit >= DATA_ALERT_THRESHOLD:
-            key = (username, "data")
-            active_keys.add(key)
-            if key not in _alerted:
-                lines.append(f"📦 «{username}» حجمش داره تموم می‌شه: <code>{fmt_bytes(used)} / {fmt_bytes(limit)}</code>")
-
-        if expire and 0 < (expire - now) <= EXPIRE_ALERT_HOURS * 3600:
-            key = (username, "expire")
-            active_keys.add(key)
-            if key not in _alerted:
-                hours_left = int((expire - now) / 3600)
-                lines.append(f"📅 «{username}» کمتر از {hours_left} ساعت تا انقضا داره")
-
-    _alerted.intersection_update(active_keys)
-    _alerted.update(active_keys)
-
-    if lines:
-        text = "⚠️ <b>هشدار خودکار</b>\n\n" + "\n".join(lines)
-        for admin_id in ADMIN_IDS:
-            try:
-                await bot.send_message(admin_id, text, parse_mode="HTML")
-            except Exception:
-                pass
-
-
-async def _send_backup(bot: Bot):
-    try:
-        users = await marzban.list_all_users()
-    except MarzbanError:
-        return
-    payload = json.dumps(users, ensure_ascii=False, indent=2, default=str).encode("utf-8")
-    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-    doc = BufferedInputFile(payload, filename=f"marzban-backup-{today}.json")
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_document(admin_id, doc, caption=f"🗄 بک‌آپ لیست کاربران — {today}")
-        except Exception:
-            pass
-
-
-async def background_jobs(bot: Bot):
-    last_backup_date = None
-    while True:
-        await _check_alerts(bot)
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if now.hour == BACKUP_HOUR_UTC and last_backup_date != now.date():
-            await _send_backup(bot)
-            last_backup_date = now.date()
-        await asyncio.sleep(ALERT_CHECK_INTERVAL)
-
-
 async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
-    asyncio.create_task(background_jobs(bot))
     try:
         await dp.start_polling(bot)
     finally:
