@@ -21,6 +21,10 @@ logging.basicConfig(level=logging.INFO)
 
 router = Router()
 
+# آستانه «کم‌کردن زیاد» — بیشتر از این مقدار تأیید می‌خواهد
+LARGE_REDUCE_DAYS = 7
+LARGE_REDUCE_GB = 5.0
+
 
 def admin_only(handler):
     @functools.wraps(handler)
@@ -48,15 +52,37 @@ ONLINE_THRESHOLD_SECONDS = 180
 
 def fmt_bytes(n: int) -> str:
     if not n:
-        return "0GB"
+        return "0 GB"
     gb = n / (1024 ** 3)
-    return f"{gb:.2f}GB"
+    if gb < 1:
+        mb = n / (1024 ** 2)
+        return f"{mb:.0f} MB"
+    return f"{gb:.2f} GB"
 
 
 def fmt_expire(ts) -> str:
     if not ts:
         return "نامحدود"
-    return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+    return datetime.datetime.fromtimestamp(ts).strftime("%Y/%m/%d")
+
+
+def remaining_time_fa(ts) -> str:
+    if not ts:
+        return "نامحدود"
+    now = datetime.datetime.now().timestamp()
+    delta = int(ts - now)
+    if delta <= 0:
+        return "منقضی شده"
+    days = delta // 86400
+    hours = (delta % 86400) // 3600
+    if days > 0 and hours > 0:
+        return f"{days} روز و {hours} ساعت"
+    if days > 0:
+        return f"{days} روز"
+    if hours > 0:
+        return f"{hours} ساعت"
+    minutes = (delta % 3600) // 60
+    return f"{max(minutes, 1)} دقیقه"
 
 
 def _parse_online_at(online_at):
@@ -100,21 +126,21 @@ def is_online(user: dict) -> bool:
 def online_status_line(user: dict) -> str:
     dt = _parse_online_at(user.get("online_at"))
     if not dt:
-        return "🔴 اتصال: هرگز وصل نشده"
+        return "🔴 هرگز متصل نشده"
     delta = (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds()
     if 0 <= delta < ONLINE_THRESHOLD_SECONDS:
-        return "🟢 اتصال: آنلاین"
+        return "🟢 آنلاین"
     return f"⚪️ آخرین اتصال: {_relative_time_fa(delta)}"
 
 
-def progress_bar(used: int, limit: int, length: int = 10) -> str:
+def progress_bar(used: int, limit: int, length: int = 12) -> str:
     if not limit or limit <= 0:
         return ""
     ratio = min(used / limit, 1.0)
     filled = round(ratio * length)
-    bar = "▓" * filled + "░" * (length - filled)
+    bar = "█" * filled + "░" * (length - filled)
     pct = int(ratio * 100)
-    return f"<code>[{bar}] {pct}%</code>"
+    return f"<code>{bar}</code>  {pct}%"
 
 
 def get_user_locations(user: dict) -> list[str]:
@@ -194,12 +220,12 @@ async def get_nodes_status_text() -> str:
     if not nodes:
         return "📍 هیچ نودی پیدا نشد"
 
-    lines = ["📍 <b>وضعیت نودها:</b>"]
+    lines = ["📍 <b>وضعیت نودها</b>"]
     for node in nodes:
         name = node.get("name", "بدون‌نام")
         status = node.get("status", "unknown")
         icon = "🟢" if status == "connected" else "🔴"
-        lines.append(f"{icon} {name}")
+        lines.append(f"  {icon}  {name}")
 
     return "\n".join(lines)
 
@@ -215,47 +241,50 @@ async def user_summary(user: dict) -> str:
     limit_str = fmt_bytes(limit) if limit else "نامحدود"
     bar = progress_bar(used, limit)
 
-    expire = fmt_expire(user.get("expire"))
+    remain_data = ""
+    if limit and limit > 0:
+        left = max(limit - used, 0)
+        remain_data = f"\nباقی‌مانده:  <b>{fmt_bytes(left)}</b>"
+
+    expire_ts = user.get("expire")
+    expire = fmt_expire(expire_ts)
+    remain = remaining_time_fa(expire_ts)
 
     locations = get_user_locations(user)
-    loc_text = " + ".join(locations) if locations else "هیچکدام"
+    loc_text = "  ·  ".join(locations) if locations else "—"
 
     sub_url = user.get("subscription_url", "")
     if sub_url and sub_url.startswith("/"):
         sub_url = MARZBAN_URL + sub_url
 
     lines = [
-        f"👤 <b>{username}</b>  —  {status_fa}",
-        online_status_line(user),
+        f"┏━━━━━━━━━━━━━━━━━━",
+        f"┃  👤  <b>{username}</b>",
+        f"┃  {status_fa}   ·   {online_status_line(user)}",
+        f"┗━━━━━━━━━━━━━━━━━━",
         "",
-        "📊 مصرف:",
-        f"<code>{used_str} / {limit_str}</code>",
+        "📊  <b>مصرف حجم</b>",
+        f"<code>{used_str}</code>  از  <code>{limit_str}</code>{remain_data}",
     ]
     if bar:
         lines.append(bar)
+
     lines += [
         "",
-        f"📅 انقضا:  <code>{expire}</code>",
-        f"📍 لوکیشن‌ها:  <b>{loc_text}</b>",
+        "📅  <b>اعتبار</b>",
+        f"انقضا:  <code>{expire}</code>",
+        f"باقی‌مانده:  <b>{remain}</b>",
+        "",
+        f"📍  <b>لوکیشن‌ها</b>",
+        f"{loc_text}",
     ]
 
-    try:
-        configs_by_loc = await extract_configs_by_location(user)
-        has_any = any(configs_by_loc.values())
-        if has_any:
-            lines.append("")
-            lines.append("📄 <b>کانفیگ‌ها:</b>")
-            for loc_name, confs in configs_by_loc.items():
-                if not confs:
-                    continue
-                lines.append(f"\n{loc_name}:")
-                for conf in confs:
-                    lines.append(f"<code>{conf}</code>")
-    except Exception:
-        pass
-
     if sub_url:
-        lines += ["", "🔗 لینک اشتراک:", f"<code>{sub_url}</code>"]
+        lines += [
+            "",
+            "🔗  <b>لینک اشتراک</b>",
+            f"<code>{sub_url}</code>",
+        ]
 
     return "\n".join(lines)
 
@@ -265,7 +294,12 @@ async def user_summary(user: dict) -> str:
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     nodes_text = await get_nodes_status_text()
-    text = f"سلام! 👋\n\n🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
+    text = (
+        f"سلام 👋\n\n"
+        f"🛡  <b>پنل مدیریت مرزبان</b>\n\n"
+        f"{nodes_text}\n\n"
+        f"یکی از گزینه‌ها را انتخاب کنید:"
+    )
     await message.answer(text, reply_markup=main_menu_kb(), parse_mode="HTML")
 
 
@@ -274,7 +308,11 @@ async def cmd_start(message: Message, state: FSMContext):
 async def cb_main_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
     nodes_text = await get_nodes_status_text()
-    text = f"🛡 <b>پنل مدیریت مرزبان</b>\n\n{nodes_text}\n\nیکی از گزینه‌ها رو انتخاب کن:"
+    text = (
+        f"🛡  <b>پنل مدیریت مرزبان</b>\n\n"
+        f"{nodes_text}\n\n"
+        f"یکی از گزینه‌ها را انتخاب کنید:"
+    )
     await call.message.edit_text(text, reply_markup=main_menu_kb(), parse_mode="HTML")
     await call.answer()
 
@@ -284,8 +322,9 @@ async def cb_main_menu(call: CallbackQuery, state: FSMContext):
 async def cb_add_user(call: CallbackQuery, state: FSMContext):
     await state.set_state(AddUser.username)
     await call.message.edit_text(
-        "نام کاربری جدید رو بفرست (فقط حروف انگلیسی و عدد، بدون فاصله):",
+        "نام کاربری جدید را بفرستید\n<code>فقط حروف انگلیسی، عدد و _</code>",
         reply_markup=cancel_kb(),
+        parse_mode="HTML",
     )
     await call.answer()
 
@@ -295,11 +334,11 @@ async def cb_add_user(call: CallbackQuery, state: FSMContext):
 async def add_user_username(message: Message, state: FSMContext):
     username = message.text.strip()
     if not username.replace("_", "").isalnum():
-        await message.answer("نام کاربری نامعتبره، دوباره امتحان کن (فقط حروف/عدد/آندرلاین):")
+        await message.answer("نام کاربری نامعتبر است. دوباره امتحان کنید:")
         return
     await state.update_data(username=username)
     await state.set_state(AddUser.data_limit)
-    await message.answer("حجم مصرفی رو به گیگابایت بفرست (برای نامحدود عدد 0 بفرست):")
+    await message.answer("حجم را به گیگابایت بفرستید\n<code>برای نامحدود: 0</code>", parse_mode="HTML")
 
 
 @router.message(AddUser.data_limit)
@@ -308,11 +347,11 @@ async def add_user_data_limit(message: Message, state: FSMContext):
     try:
         gb = float(message.text.strip())
     except ValueError:
-        await message.answer("لطفاً یک عدد معتبر بفرست (مثلاً 30 یا 0):")
+        await message.answer("یک عدد معتبر بفرستید (مثلاً 30 یا 0):")
         return
     await state.update_data(data_limit=gb)
     await state.set_state(AddUser.expire_days)
-    await message.answer("مدت اعتبار رو به روز بفرست (برای نامحدود عدد 0 بفرست):")
+    await message.answer("مدت اعتبار را به روز بفرستید\n<code>برای نامحدود: 0</code>", parse_mode="HTML")
 
 
 @router.message(AddUser.expire_days)
@@ -321,7 +360,7 @@ async def add_user_expire(message: Message, state: FSMContext):
     try:
         days = int(message.text.strip())
     except ValueError:
-        await message.answer("لطفاً یک عدد صحیح بفرست (مثلاً 30 یا 0):")
+        await message.answer("یک عدد صحیح بفرستید (مثلاً 30 یا 0):")
         return
 
     await state.update_data(expire_days=days)
@@ -329,8 +368,8 @@ async def add_user_expire(message: Message, state: FSMContext):
     await state.update_data(selected_locations=set())
 
     await message.answer(
-        "لوکیشن‌های مورد نظر رو انتخاب کن (می‌تونی یکی یا چند تا رو بزنی):",
-        reply_markup=location_kb(set(), confirm_cb="loc_confirm_add")
+        "لوکیشن‌های مورد نظر را انتخاب کنید:",
+        reply_markup=location_kb(set(), confirm_cb="loc_confirm_add"),
     )
 
 
@@ -360,7 +399,7 @@ async def loc_confirm_add(call: CallbackQuery, state: FSMContext):
     selected = list(data.get("selected_locations", set()))
 
     if not selected:
-        await call.answer("حداقل یک لوکیشن انتخاب کن!", show_alert=True)
+        await call.answer("حداقل یک لوکیشن انتخاب کنید", show_alert=True)
         return
 
     username = data["username"]
@@ -375,7 +414,7 @@ async def loc_confirm_add(call: CallbackQuery, state: FSMContext):
         return
 
     await call.message.edit_text(
-        f"✅ کاربر ساخته شد.\n\n{await user_summary(user)}",
+        f"✅ کاربر ساخته شد\n\n{await user_summary(user)}",
         reply_markup=user_detail_kb(username, user.get("status", "active")),
         parse_mode="HTML",
     )
@@ -404,7 +443,8 @@ async def cb_list_users(call: CallbackQuery, state: FSMContext):
     ]
     online_count = sum(1 for r in rows if r["online"])
     await call.message.edit_text(
-        f"📋 <b>لیست کاربران</b>\n🟢 آنلاین: {online_count} از {len(rows)} کاربر این صفحه",
+        f"📋  <b>لیست کاربران</b>\n"
+        f"🟢 آنلاین این صفحه: <b>{online_count}</b> از {len(rows)}",
         reply_markup=users_list_kb(rows, offset, has_more),
         parse_mode="HTML",
     )
@@ -414,6 +454,7 @@ async def cb_list_users(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("user:"))
 @admin_only
 async def cb_user_detail(call: CallbackQuery, state: FSMContext):
+    await state.clear()
     username = call.data.split(":", 1)[1]
     try:
         user = await marzban.get_user(username)
@@ -424,7 +465,7 @@ async def cb_user_detail(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         await user_summary(user),
         reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
     await call.answer()
 
@@ -450,20 +491,44 @@ async def cb_copy_configs(call: CallbackQuery, state: FSMContext):
         await call.answer("هیچ کانفیگی پیدا نشد", show_alert=True)
         return
 
-    lines = [f"📄 <b>همه کانفیگ‌های {username}</b>\n"]
+    lines = [f"📄  <b>کانفیگ‌های {username}</b>", ""]
     for loc_name, confs in configs_by_loc.items():
         if not confs:
             continue
-        lines.append(f"\n{loc_name}:")
+        lines.append(f"{loc_name}")
         for conf in confs:
             lines.append(f"<code>{conf}</code>")
+        lines.append("")
 
-    text = "\n".join(lines)
+    text = "\n".join(lines).strip()
     if len(text) > 4000:
-        text = text[:3900] + "\n\n... (پیام خیلی طولانی بود)"
+        text = text[:3900] + "\n\n… (پیام کوتاه شد)"
 
     await call.message.answer(text, parse_mode="HTML")
-    await call.answer("کانفیگ‌ها ارسال شد ✅")
+    await call.answer("ارسال شد")
+
+
+@router.callback_query(F.data.startswith("link:"))
+@admin_only
+async def cb_link(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    try:
+        user = await marzban.get_user(username)
+    except MarzbanError as e:
+        await call.answer(f"خطا: {e}", show_alert=True)
+        return
+    sub_url = user.get("subscription_url", "")
+    if not sub_url:
+        await call.answer("لینک اشتراک پیدا نشد", show_alert=True)
+        return
+    if sub_url.startswith("/"):
+        sub_url = MARZBAN_URL + sub_url
+    await call.message.answer(
+        f"🔗  <b>لینک اشتراک</b>  ·  <code>{username}</code>\n\n"
+        f"<code>{sub_url}</code>",
+        parse_mode="HTML",
+    )
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("editloc:"))
@@ -481,9 +546,9 @@ async def cb_edit_location(call: CallbackQuery, state: FSMContext):
     await state.update_data(username=username, selected_locations=current)
 
     await call.message.edit_text(
-        f"ویرایش لوکیشن کاربر <b>{username}</b>\n"
-        f"لوکیشن‌های فعلی: {', '.join(current) if current else 'هیچکدام'}\n\n"
-        "لوکیشن‌های جدید رو انتخاب کن:",
+        f"📍  ویرایش لوکیشن  ·  <b>{username}</b>\n"
+        f"فعلی: {', '.join(current) if current else '—'}\n\n"
+        f"لوکیشن‌های جدید را انتخاب کنید:",
         reply_markup=location_kb(current, confirm_cb="loc_confirm_edit"),
         parse_mode="HTML",
     )
@@ -517,7 +582,7 @@ async def loc_confirm_edit(call: CallbackQuery, state: FSMContext):
     username = data["username"]
 
     if not selected:
-        await call.answer("حداقل یک لوکیشن انتخاب کن!", show_alert=True)
+        await call.answer("حداقل یک لوکیشن انتخاب کنید", show_alert=True)
         return
 
     await state.clear()
@@ -529,7 +594,7 @@ async def loc_confirm_edit(call: CallbackQuery, state: FSMContext):
         return
 
     await call.message.edit_text(
-        f"✅ لوکیشن‌ها به‌روز شد.\n\n{await user_summary(user)}",
+        f"✅ لوکیشن‌ها به‌روز شد\n\n{await user_summary(user)}",
         reply_markup=user_detail_kb(username, user.get("status", "active")),
         parse_mode="HTML",
     )
@@ -542,7 +607,11 @@ async def cb_extend(call: CallbackQuery, state: FSMContext):
     username = call.data.split(":", 1)[1]
     await state.update_data(username=username)
     await state.set_state(ExtendUser.days)
-    await call.message.edit_text(f"چند روز به اعتبار «{username}» اضافه بشه؟", reply_markup=cancel_kb())
+    await call.message.edit_text(
+        f"چند روز به اعتبار <b>{username}</b> اضافه شود؟",
+        reply_markup=cancel_kb(),
+        parse_mode="HTML",
+    )
     await call.answer()
 
 
@@ -552,7 +621,7 @@ async def extend_days(message: Message, state: FSMContext):
     try:
         days = int(message.text.strip())
     except ValueError:
-        await message.answer("یک عدد صحیح بفرست:")
+        await message.answer("یک عدد صحیح بفرستید:")
         return
     data = await state.get_data()
     username = data["username"]
@@ -563,9 +632,9 @@ async def extend_days(message: Message, state: FSMContext):
         await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
         return
     await message.answer(
-        f"✅ انجام شد.\n\n{await user_summary(user)}",
+        f"✅  <b>+{days} روز</b> اضافه شد\n\n{await user_summary(user)}",
         reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
@@ -575,7 +644,11 @@ async def cb_reduce_day(call: CallbackQuery, state: FSMContext):
     username = call.data.split(":", 1)[1]
     await state.update_data(username=username)
     await state.set_state(ReduceDays.days)
-    await call.message.edit_text(f"چند روز از اعتبار «{username}» کم بشه؟", reply_markup=cancel_kb())
+    await call.message.edit_text(
+        f"چند روز از اعتبار <b>{username}</b> کم شود؟",
+        reply_markup=cancel_kb(),
+        parse_mode="HTML",
+    )
     await call.answer()
 
 
@@ -585,23 +658,34 @@ async def reduce_days(message: Message, state: FSMContext):
     try:
         days = int(message.text.strip())
     except ValueError:
-        await message.answer("یک عدد صحیح بفرست:")
+        await message.answer("یک عدد صحیح بفرستید:")
         return
     if days <= 0:
-        await message.answer("یک عدد مثبت بفرست:")
+        await message.answer("یک عدد مثبت بفرستید:")
         return
     data = await state.get_data()
     username = data["username"]
     await state.clear()
+
+    # کم‌کردن زیاد → تأیید
+    if days >= LARGE_REDUCE_DAYS:
+        await message.answer(
+            f"⚠️  در حال کم کردن <b>{days} روز</b> از <code>{username}</code>\n"
+            f"این مقدار نسبتاً زیاد است. مطمئن هستید؟",
+            reply_markup=confirm_kb("reduceday", username, str(days)),
+            parse_mode="HTML",
+        )
+        return
+
     try:
         user = await marzban.subtract_days(username, days)
     except MarzbanError as e:
         await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
         return
     await message.answer(
-        f"✅ انجام شد.\n\n{await user_summary(user)}",
+        f"✅  <b>−{days} روز</b> کم شد\n\n{await user_summary(user)}",
         reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
@@ -611,7 +695,11 @@ async def cb_adddata(call: CallbackQuery, state: FSMContext):
     username = call.data.split(":", 1)[1]
     await state.update_data(username=username)
     await state.set_state(AddDataUser.gb)
-    await call.message.edit_text(f"چند گیگابایت به حجم «{username}» اضافه بشه؟", reply_markup=cancel_kb())
+    await call.message.edit_text(
+        f"چند گیگابایت به حجم <b>{username}</b> اضافه شود؟",
+        reply_markup=cancel_kb(),
+        parse_mode="HTML",
+    )
     await call.answer()
 
 
@@ -621,7 +709,7 @@ async def adddata_gb(message: Message, state: FSMContext):
     try:
         gb = float(message.text.strip())
     except ValueError:
-        await message.answer("یک عدد معتبر بفرست:")
+        await message.answer("یک عدد معتبر بفرستید:")
         return
     data = await state.get_data()
     username = data["username"]
@@ -632,9 +720,9 @@ async def adddata_gb(message: Message, state: FSMContext):
         await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
         return
     await message.answer(
-        f"✅ انجام شد.\n\n{await user_summary(user)}",
+        f"✅  <b>+{gb:g} GB</b> اضافه شد\n\n{await user_summary(user)}",
         reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
@@ -644,7 +732,11 @@ async def cb_reduce_data(call: CallbackQuery, state: FSMContext):
     username = call.data.split(":", 1)[1]
     await state.update_data(username=username)
     await state.set_state(ReduceDataUser.gb)
-    await call.message.edit_text(f"چند گیگابایت از حجم «{username}» کم بشه؟", reply_markup=cancel_kb())
+    await call.message.edit_text(
+        f"چند گیگابایت از حجم <b>{username}</b> کم شود؟",
+        reply_markup=cancel_kb(),
+        parse_mode="HTML",
+    )
     await call.answer()
 
 
@@ -654,23 +746,34 @@ async def reduce_data_gb(message: Message, state: FSMContext):
     try:
         gb = float(message.text.strip())
     except ValueError:
-        await message.answer("یک عدد معتبر بفرست:")
+        await message.answer("یک عدد معتبر بفرستید:")
         return
     if gb <= 0:
-        await message.answer("یک عدد مثبت بفرست:")
+        await message.answer("یک عدد مثبت بفرستید:")
         return
     data = await state.get_data()
     username = data["username"]
     await state.clear()
+
+    # کم‌کردن زیاد → تأیید
+    if gb >= LARGE_REDUCE_GB:
+        await message.answer(
+            f"⚠️  در حال کم کردن <b>{gb:g} GB</b> از <code>{username}</code>\n"
+            f"این مقدار نسبتاً زیاد است. مطمئن هستید؟",
+            reply_markup=confirm_kb("reducedata", username, str(gb)),
+            parse_mode="HTML",
+        )
+        return
+
     try:
         user = await marzban.subtract_data_gb(username, gb)
     except MarzbanError as e:
         await message.answer(f"❌ خطا:\n{e}", reply_markup=main_menu_kb())
         return
     await message.answer(
-        f"✅ انجام شد.\n\n{await user_summary(user)}",
+        f"✅  <b>−{gb:g} GB</b> کم شد\n\n{await user_summary(user)}",
         reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
@@ -679,7 +782,9 @@ async def reduce_data_gb(message: Message, state: FSMContext):
 async def cb_reset(call: CallbackQuery, state: FSMContext):
     username = call.data.split(":", 1)[1]
     await call.message.edit_text(
-        f"مطمئنی می‌خوای مصرف «{username}» صفر بشه؟", reply_markup=confirm_kb("reset", username)
+        f"🔄  ریست مصرف <code>{username}</code>\n\nمطمئن هستید؟",
+        reply_markup=confirm_kb("reset", username),
+        parse_mode="HTML",
     )
     await call.answer()
 
@@ -699,9 +804,9 @@ async def cb_toggle(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         await user_summary(user),
         reply_markup=user_detail_kb(username, user.get("status", "active")),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
-    await call.answer("انجام شد ✅")
+    await call.answer("انجام شد")
 
 
 @router.callback_query(F.data.startswith("delete:"))
@@ -709,40 +814,51 @@ async def cb_toggle(call: CallbackQuery, state: FSMContext):
 async def cb_delete(call: CallbackQuery, state: FSMContext):
     username = call.data.split(":", 1)[1]
     await call.message.edit_text(
-        f"⚠️ مطمئنی می‌خوای «{username}» رو کامل حذف کنی؟ این کار برگشت‌ناپذیره.",
+        f"🗑  حذف کاربر <code>{username}</code>\n\n"
+        f"این کار برگشت‌ناپذیر است. مطمئن هستید؟",
         reply_markup=confirm_kb("delete", username),
+        parse_mode="HTML",
     )
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("link:"))
-@admin_only
-async def cb_link(call: CallbackQuery, state: FSMContext):
-    username = call.data.split(":", 1)[1]
-    try:
-        user = await marzban.get_user(username)
-    except MarzbanError as e:
-        await call.answer(f"خطا: {e}", show_alert=True)
-        return
-    sub_url = user.get("subscription_url", "")
-    if sub_url and sub_url.startswith("/"):
-        sub_url = MARZBAN_URL + sub_url
-    await call.message.answer(f"🔗 لینک اشتراک «{username}»:\n<code>{sub_url}</code>", parse_mode="HTML")
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("confirm:"))
 @admin_only
 async def cb_confirm(call: CallbackQuery, state: FSMContext):
-    _, action, username = call.data.split(":", 2)
+    parts = call.data.split(":")
+    # confirm:action:username[:extra]
+    action = parts[1]
+    username = parts[2]
+    extra = parts[3] if len(parts) > 3 else None
+
     try:
         if action == "delete":
             await marzban.delete_user(username)
-            await call.message.edit_text(f"🗑 کاربر «{username}» حذف شد.", reply_markup=main_menu_kb())
+            await call.message.edit_text(
+                f"🗑  کاربر <code>{username}</code> حذف شد.",
+                reply_markup=main_menu_kb(),
+                parse_mode="HTML",
+            )
         elif action == "reset":
             user = await marzban.reset_user_data(username)
             await call.message.edit_text(
-                f"🔄 مصرف «{username}» ریست شد.\n\n{await user_summary(user)}",
+                f"🔄  مصرف ریست شد\n\n{await user_summary(user)}",
+                reply_markup=user_detail_kb(username, user.get("status", "active")),
+                parse_mode="HTML",
+            )
+        elif action == "reduceday":
+            days = int(extra)
+            user = await marzban.subtract_days(username, days)
+            await call.message.edit_text(
+                f"✅  <b>−{days} روز</b> کم شد\n\n{await user_summary(user)}",
+                reply_markup=user_detail_kb(username, user.get("status", "active")),
+                parse_mode="HTML",
+            )
+        elif action == "reducedata":
+            gb = float(extra)
+            user = await marzban.subtract_data_gb(username, gb)
+            await call.message.edit_text(
+                f"✅  <b>−{gb:g} GB</b> کم شد\n\n{await user_summary(user)}",
                 reply_markup=user_detail_kb(username, user.get("status", "active")),
                 parse_mode="HTML",
             )
@@ -762,7 +878,9 @@ async def cb_system_stats(call: CallbackQuery, state: FSMContext):
         await call.answer()
         return
 
-    total_traffic = fmt_bytes((stats.get("incoming_bandwidth", 0) or 0) + (stats.get("outgoing_bandwidth", 0) or 0))
+    total_traffic = fmt_bytes(
+        (stats.get("incoming_bandwidth", 0) or 0) + (stats.get("outgoing_bandwidth", 0) or 0)
+    )
     mem_used = fmt_bytes(stats.get("mem_used", 0) or 0)
     mem_total = fmt_bytes(stats.get("mem_total", 0) or 0)
 
@@ -777,19 +895,19 @@ async def cb_system_stats(call: CallbackQuery, state: FSMContext):
                     loc_stats[loc]["online"] += 1
 
     lines = [
-        "📊 <b>وضعیت سیستم</b>",
+        "📊  <b>وضعیت سیستم</b>",
         "",
-        f"👥 کاربران کل: <code>{stats.get('total_user', '-')}</code>",
-        f"✅ کاربران فعال: <code>{stats.get('users_active', '-')}</code>",
-        f"📶 مصرف کل ترافیک: <code>{total_traffic}</code>",
-        f"💾 مصرف رم: <code>{mem_used} / {mem_total}</code>",
-        f"⚙️ هسته‌های CPU: <code>{stats.get('cpu_cores', '-')}</code>  |  بار: <code>{stats.get('cpu_usage', '-')}%</code>",
+        f"👥  کاربران کل:  <code>{stats.get('total_user', '-')}</code>",
+        f"✅  فعال:  <code>{stats.get('users_active', '-')}</code>",
+        f"📶  ترافیک کل:  <code>{total_traffic}</code>",
+        f"💾  رم:  <code>{mem_used} / {mem_total}</code>",
+        f"⚙️  CPU:  <code>{stats.get('cpu_cores', '-')}</code> هسته  ·  <code>{stats.get('cpu_usage', '-')}%</code>",
         "",
-        "📍 <b>آمار به تفکیک لوکیشن:</b>",
+        "📍  <b>به تفکیک لوکیشن</b>",
     ]
 
     for loc_name, data in loc_stats.items():
-        lines.append(f"{loc_name}:  {data['online']} آنلاین از {data['total']} کاربر")
+        lines.append(f"  {loc_name}:  {data['online']} آنلاین از {data['total']}")
 
     await call.message.edit_text("\n".join(lines), reply_markup=main_menu_kb(), parse_mode="HTML")
     await call.answer()
