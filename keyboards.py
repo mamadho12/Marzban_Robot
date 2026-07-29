@@ -46,6 +46,9 @@ def user_detail_kb(username: str, status: str = "active") -> InlineKeyboardMarku
         InlineKeyboardButton(text="📄 کانفیگ‌ها", callback_data=f"copyconfigs:{username}"),
     )
     b.row(
+        InlineKeyboardButton(text="🔄 تغییر لینک", callback_data=f"changelink:{username}"),
+    )
+    b.row(
         InlineKeyboardButton(text="🔄 ریست مصرف", callback_data=f"reset:{username}"),
         InlineKeyboardButton(
             text="⛔️ غیرفعال" if status == "active" else "✅ فعال‌سازی",
@@ -74,10 +77,6 @@ def location_kb(selected: set[str] | None = None, confirm_cb: str = "loc_confirm
 
 
 def confirm_kb(action: str, username: str, extra: str = "") -> InlineKeyboardMarkup:
-    """
-    action: delete | reset | reduceday | reducedata
-    extra: مقدار روز یا حجم (برای کم‌کردن زیاد)
-    """
     b = InlineKeyboardBuilder()
     cb = f"confirm:{action}:{username}"
     if extra:
