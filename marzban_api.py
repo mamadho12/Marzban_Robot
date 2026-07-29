@@ -147,6 +147,10 @@ class MarzbanAPI:
     async def reset_user_data(self, username: str):
         return await self._request("POST", f"/api/user/{username}/reset")
 
+    async def revoke_sub(self, username: str):
+        """لینک اشتراک فعلی را باطل می‌کند و لینک جدید می‌سازد."""
+        return await self._request("POST", f"/api/user/{username}/revoke_sub")
+
     async def add_days(self, username: str, days: int):
         user = await self.get_user(username)
         current_expire = user.get("expire") or 0
@@ -154,10 +158,37 @@ class MarzbanAPI:
         new_expire = base + days * 86400
         return await self.modify_user(username, expire=new_expire)
 
+    async def subtract_days(self, username: str, days: int):
+        user = await self.get_user(username)
+        current_expire = user.get("expire") or 0
+        if not current_expire:
+            raise MarzbanError("این کاربر تاریخ انقضای نامحدود داره، چیزی برای کم‌کردن نیست.")
+        new_expire = current_expire - days * 86400
+        now = int(time.time())
+        if new_expire < now:
+            new_expire = now
+        return await self.modify_user(username, expire=new_expire)
+
     async def add_data_gb(self, username: str, gb: float):
+        if gb <= 0:
+            raise MarzbanError("مقدار حجم باید بزرگ‌تر از صفر باشد.")
         user = await self.get_user(username)
         current_limit = user.get("data_limit") or 0
         new_limit = current_limit + int(gb * 1024 ** 3)
+        if new_limit <= 0:
+            new_limit = 1
+        return await self.modify_user(username, data_limit=new_limit)
+
+    async def subtract_data_gb(self, username: str, gb: float):
+        if gb <= 0:
+            raise MarzbanError("مقدار حجم باید بزرگ‌تر از صفر باشد.")
+        user = await self.get_user(username)
+        current_limit = user.get("data_limit") or 0
+        if not current_limit:
+            raise MarzbanError("این کاربر حجم نامحدود داره، چیزی برای کم‌کردن نیست.")
+        new_limit = current_limit - int(gb * 1024 ** 3)
+        if new_limit <= 0:
+            new_limit = 1
         return await self.modify_user(username, data_limit=new_limit)
 
     async def get_system_stats(self):
