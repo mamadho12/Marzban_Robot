@@ -21,7 +21,6 @@ logging.basicConfig(level=logging.INFO)
 
 router = Router()
 
-# آستانه «کم‌کردن زیاد» — بیشتر از این مقدار تأیید می‌خواهد
 LARGE_REDUCE_DAYS = 7
 LARGE_REDUCE_GB = 5.0
 
@@ -539,6 +538,22 @@ async def cb_link(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+@router.callback_query(F.data.startswith("changelink:"))
+@admin_only
+async def cb_change_link(call: CallbackQuery, state: FSMContext):
+    username = call.data.split(":", 1)[1]
+    await call.message.edit_text(
+        f"🔄  <b>تغییر لینک اشتراک</b>\n\n"
+        f"کاربر:  <code>{username}</code>\n\n"
+        f"لینک فعلی باطل می‌شود و لینک جدید ساخته می‌شود.\n"
+        f"لینک‌های قبلی دیگر کار نخواهند کرد.\n\n"
+        f"مطمئن هستید؟",
+        reply_markup=confirm_kb("changelink", username),
+        parse_mode="HTML",
+    )
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("editloc:"))
 @admin_only
 async def cb_edit_location(call: CallbackQuery, state: FSMContext):
@@ -848,6 +863,16 @@ async def cb_confirm(call: CallbackQuery, state: FSMContext):
             user = await marzban.reset_user_data(username)
             await call.message.edit_text(
                 f"🔄  مصرف ریست شد\n\n{await user_summary(user)}",
+                reply_markup=user_detail_kb(username, user.get("status", "active")),
+                parse_mode="HTML",
+            )
+        elif action == "changelink":
+            user = await marzban.revoke_sub(username)
+            if not user:
+                user = await marzban.get_user(username)
+            await call.message.edit_text(
+                f"✅  لینک اشتراک <code>{username}</code> تغییر کرد.\n\n"
+                f"{await user_summary(user)}",
                 reply_markup=user_detail_kb(username, user.get("status", "active")),
                 parse_mode="HTML",
             )
