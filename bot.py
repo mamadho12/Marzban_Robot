@@ -51,12 +51,14 @@ ONLINE_THRESHOLD_SECONDS = 180
 
 
 def fmt_bytes(n: int) -> str:
-    if not n:
+    if not n or n < 0:
         return "0 GB"
     gb = n / (1024 ** 3)
-    if gb < 1:
+    if gb < 0.01:
         mb = n / (1024 ** 2)
-        return f"{mb:.0f} MB"
+        if mb < 1:
+            return f"{n} B"
+        return f"{mb:.1f} MB"
     return f"{gb:.2f} GB"
 
 
@@ -238,13 +240,19 @@ async def user_summary(user: dict) -> str:
     used = user.get("used_traffic", 0) or 0
     limit = user.get("data_limit", 0) or 0
     used_str = fmt_bytes(used)
-    limit_str = fmt_bytes(limit) if limit else "نامحدود"
     bar = progress_bar(used, limit)
 
-    remain_data = ""
     if limit and limit > 0:
         left = max(limit - used, 0)
-        remain_data = f"\nباقی‌مانده:  <b>{fmt_bytes(left)}</b>"
+        usage_block = (
+            f"<code>{used_str}</code>  /  <code>{fmt_bytes(limit)}</code>\n"
+            f"باقی‌مانده:  <b>{fmt_bytes(left)}</b>"
+        )
+    else:
+        usage_block = (
+            f"مصرف‌شده:  <code>{used_str}</code>\n"
+            f"سقف:  <b>نامحدود</b>"
+        )
 
     expire_ts = user.get("expire")
     expire = fmt_expire(expire_ts)
@@ -264,7 +272,7 @@ async def user_summary(user: dict) -> str:
         f"┗━━━━━━━━━━━━━━━━━━",
         "",
         "📊  <b>مصرف حجم</b>",
-        f"<code>{used_str}</code>  از  <code>{limit_str}</code>{remain_data}",
+        usage_block,
     ]
     if bar:
         lines.append(bar)
@@ -275,7 +283,7 @@ async def user_summary(user: dict) -> str:
         f"انقضا:  <code>{expire}</code>",
         f"باقی‌مانده:  <b>{remain}</b>",
         "",
-        f"📍  <b>لوکیشن‌ها</b>",
+        "📍  <b>لوکیشن‌ها</b>",
         f"{loc_text}",
     ]
 
@@ -667,7 +675,6 @@ async def reduce_days(message: Message, state: FSMContext):
     username = data["username"]
     await state.clear()
 
-    # کم‌کردن زیاد → تأیید
     if days >= LARGE_REDUCE_DAYS:
         await message.answer(
             f"⚠️  در حال کم کردن <b>{days} روز</b> از <code>{username}</code>\n"
@@ -755,7 +762,6 @@ async def reduce_data_gb(message: Message, state: FSMContext):
     username = data["username"]
     await state.clear()
 
-    # کم‌کردن زیاد → تأیید
     if gb >= LARGE_REDUCE_GB:
         await message.answer(
             f"⚠️  در حال کم کردن <b>{gb:g} GB</b> از <code>{username}</code>\n"
@@ -826,7 +832,6 @@ async def cb_delete(call: CallbackQuery, state: FSMContext):
 @admin_only
 async def cb_confirm(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    # confirm:action:username[:extra]
     action = parts[1]
     username = parts[2]
     extra = parts[3] if len(parts) > 3 else None
