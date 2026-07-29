@@ -12,7 +12,15 @@ class ExtendUser(StatesGroup):
     days = State()
 
 
+class ReduceDays(StatesGroup):
+    days = State()
+
+
 class AddDataUser(StatesGroup):
+    gb = State()
+
+
+class ReduceDataUser(StatesGroup):
     gb = State()
 
 
